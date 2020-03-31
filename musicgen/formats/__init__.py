@@ -7,11 +7,11 @@ def parse_midi_el(el):
     dur = int(4 * el.duration.quarterLength)
     ofs = int(4 * el.offset)
     if isinstance(el, Note):
-        return [(ofs, dur, el.pitch.midi)]
+        return {(ofs, dur, el.pitch.midi)}
     elif isinstance(el, Chord):
-        return [(ofs, dur, p.midi) for p in el.pitches]
-    return []
+        return {(ofs, dur, p.midi) for p in el.pitches}
+    return set()
 
 def parse_midi_notes(fname):
     midi = parse(fname)
-    return sum([parse_midi_el(e) for e in midi.recurse()], [])
+    return set.union(*[parse_midi_el(e) for e in midi.recurse()])
