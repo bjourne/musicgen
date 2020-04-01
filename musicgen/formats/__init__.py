@@ -3,14 +3,24 @@ from music21.chord import Chord
 from music21.converter import parse
 from music21.note import Note
 
+SAMPLE_FREQ = 12
+
 def parse_midi_el(el):
-    dur = int(4 * el.duration.quarterLength)
-    ofs = int(4 * el.offset)
+
+    dur = SAMPLE_FREQ * el.duration.quarterLength
+    int_dur = int(dur)
+    assert dur == int_dur
+
+    ofs = SAMPLE_FREQ * el.offset
+    int_ofs = int(ofs)
+    assert ofs == int_ofs
+
     if isinstance(el, Note):
-        return {(ofs, dur, el.pitch.midi)}
+        return {(int_ofs, int_dur, el.pitch.midi)}
     elif isinstance(el, Chord):
-        return {(ofs, dur, p.midi) for p in el.pitches}
-    return set()
+        return {(int_ofs, int_dur, p.midi) for p in el.pitches}
+    else:
+        return set()
 
 def parse_midi_notes(fname):
     midi = parse(fname)

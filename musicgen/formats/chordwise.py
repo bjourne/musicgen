@@ -1,7 +1,7 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # Parser for the Chordwise encoding.
-from musicgen.formats import parse_midi_notes
+from musicgen.formats import SAMPLE_FREQ, parse_midi_notes
 from sys import argv
 import numpy as np
 
@@ -24,7 +24,10 @@ def normalize_notes(notes):
 
 def from_midi(fname, is_chamber_music):
     notes = parse_midi_notes(fname)
-    notes = normalize_notes(notes)
+
+    # Sort the notes so that earlier notes doesn't overwrite later
+    # ones.
+    notes = sorted(normalize_notes(notes))
     n_rows = max(ofs + dur for (ofs, dur, _) in notes)
     mat = np.zeros((n_rows + 1, NOTE_RANGE), dtype = int)
     for ofs, dur, idx in notes:
@@ -35,4 +38,4 @@ def from_midi(fname, is_chamber_music):
 if __name__ == '__main__':
     fname = argv[1]
     for row in from_midi(fname, False):
-        print(row)
+        print(''.join(map(str, row)))
