@@ -80,6 +80,16 @@ def pattern_to_string(pattern):
 def calc_row_time(tempo, speed):
     return (60 / tempo / 4) * speed / 6
 
+def update_timings(row, tempo, speed):
+    for cell in row:
+        if cell.effect_cmd == 15:
+            val = 16 * cell.effect_arg1 + cell.effect_arg2
+            if val <= 0x1f:
+                speed = val
+            else:
+                tempo = val
+    return tempo, speed
+
 def linearize_rows(mod):
     table_idx = 0
     rows = []
