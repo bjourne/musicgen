@@ -1,6 +1,7 @@
 from argparse import ArgumentParser, FileType
 from collections import defaultdict
 from itertools import groupby
+from json import load
 from mido import Message, MidiFile, MidiTrack
 from musicgen.formats.modules import *
 from musicgen.formats.modules.parser import Module
@@ -65,6 +66,9 @@ def midi_notes(conv_info, notes):
         yield program, note_off, 0, midi_idx, 0
 
 def midi_notes_to_track(channel, program, notes):
+    # Jump around the drum channel..
+    if channel >= 9:
+        channel += 1
     if program == -1:
         channel = 9
     else:
@@ -89,58 +93,29 @@ def midi_notes_to_track(channel, program, notes):
 
 def main():
     parser = ArgumentParser(description='Module stripper')
-    parser.add_argument('input', type = FileType('rb'))
-    parser.add_argument('output', type = FileType('wb'))
+    parser.add_argument('--json', type = FileType('r'))
+    parser.add_argument('module', type = FileType('rb'))
+    parser.add_argument('midi', type = FileType('wb'))
     args = parser.parse_args()
-    args.output.close()
+    args.midi.close()
 
-    with args.input as inf:
+    with args.module as inf:
         mod = Module.parse(inf.read())
 
+    if not args.json:
+        conv_info = {
+            idx : [1, MIDI_C1_IDX, 4, 1.0] for idx in range(1, 32)
+        }
+    else:
+        conv_info = load(args.json)
+        # convert to integer keys
+        conv_info = {int(k) : v for (k, v) in conv_info.items()}
+
     rows = linearize_rows(mod)
-    #print(len(rows))
-    # print(rows_to_string(rows))
+    print(rows_to_string(rows))
 
     # Extract mod notes
     notes_per_channel = [list(mod_notes(mod, rows, i)) for i in range(4)]
-
-    # This part should be configurable/learnable.
-    lead = 82
-    lead_ofs = 36
-    conv_info = {
-        # 119 = reverse
-        # Maybe 17, 82, 83
-        1 : (lead, lead_ofs, 3, 1.0),
-
-        2 : (lead, lead_ofs - 12, 4, 1.0),
-
-        3 : (17, 48, 24, 1.0),
-
-        4 : (30, 12, 12, 0.6),
-        # 41 = Low Tom 2
-        5 : (-1, 41, 2, 0.75),
-        6 : (-1, 38, 2, 1.0),
-
-        7 : (118, 12, 2, 0.5),
-        # 42
-        8 : (-1, 42, 2, 0.75),
-        # 43 maybe
-        9 : (117, 0, 6, 1.0),
-
-        10 : (-1, 49, 2, 0.75),
-
-        # Note sure...
-        11 : (lead, lead_ofs + 6, 3, 1.0),
-
-        12 : (119, 48, 4, 1.0),
-
-        13 : (62, 36, 4, 1.0),
-        14 : (62, 24, 4, 1.0),
-        15 : (64, 36, 4, 1.0),
-        16 : (64, 36, 6, 1.0),
-        17 : (64, 24, 4, 1.0),
-        18 : (64, 24, 6, 1.0)
-    }
 
     # Convert to midi notes
     notes_per_channel = [list(midi_notes(conv_info, notes))
@@ -153,7 +128,7 @@ def main():
         track = list(midi_notes_to_track(i, program, note_group))
         track = MidiTrack(track)
         midi.tracks.append(track)
-    midi.save(args.output.name)
+    midi.save(args.midi.name)
 
 if __name__ == '__main__':
     main()

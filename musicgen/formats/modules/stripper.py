@@ -14,7 +14,9 @@ def strip_cell(cell, sample_indices):
         cell.sample_lo = 0
         cell.sample_idx = 0
         cell.period = 0
-    if cell.sample_idx == 0 or cell.effect_cmd in (3,):
+
+    if (cell.sample_idx == 0 and cell.effect_cmd not in (11, 13)
+        or cell.effect_cmd in (3, 4, 5, 6, 7)):
         zero_effect(cell)
 
 def main():
