@@ -10,6 +10,16 @@ PERIODS = [
 ]
 PERIOD_TO_IDX = {p : i for i, p in enumerate(PERIODS)}
 
+def period_to_idx(period):
+    # This is a little hacky. Some cells have incorrect period values.
+    idx = PERIOD_TO_IDX.get(period)
+    if idx is None:
+        idx = PERIOD_TO_IDX.get(period - 1)
+        if idx is None:
+            idx = PERIOD_TO_IDX.get(period + 1)
+    assert idx is not None
+    return idx
+
 NOTES = [
     "C-", "C#", "D-", "D#", "E-", "F-",
     "F#", "G-", "G#", "A-", "A#", "B-"
@@ -53,7 +63,7 @@ BASE_FREQ = freq_for_index(BASE_NOTE_IDX)
 def period_to_string(period):
     if period == 0:
         return '---'
-    idx = PERIOD_TO_IDX[period]
+    idx = period_to_idx(period)
     octave_idx = idx // 12
     note_idx = idx % 12
     note = NOTES[note_idx]
