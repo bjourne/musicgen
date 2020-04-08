@@ -15,8 +15,9 @@ def strip_cell(cell, sample_indices):
         cell.sample_idx = 0
         cell.period = 0
 
-    if (cell.sample_idx == 0 and cell.effect_cmd not in (11, 13)
-        or cell.effect_cmd in (3, 4, 5, 6, 7)):
+    if cell.effect_cmd not in (11, 12, 13, 15):
+        zero_effect(cell)
+    if cell.sample_idx == 0 and cell.effect_cmd == 12:
         zero_effect(cell)
 
 def main():
@@ -24,7 +25,7 @@ def main():
     parser.add_argument('input', type = FileType('rb'))
     parser.add_argument('output', type = FileType('wb'))
     parser.add_argument('--samples',
-                        required = True,
+                        required = False,
                         help = 'Samples to keep')
     parser.add_argument('--pattern-table',
                         required = True,
@@ -39,37 +40,43 @@ def main():
     # Parse pattern indices
     pattern_indices = [int(p) for p in args.pattern_table.split(',')]
 
+    # Parse sample indices
+    if not args.samples:
+        sample_indices = list(range(32))
+    else:
+        sample_indices = [int(s) for s in args.samples.split(',')]
+
+    # Print pattern table
     if args.info:
-        old_pattern_indices = [mod.pattern_table[i]
-                               for i in range(mod.n_played_patterns)]
-        print(old_pattern_indices)
-        for idx in pattern_indices:
-            print(f'Pattern #{idx}')
+        pattern_table = [mod.pattern_table[i]
+                         for i in range(mod.n_played_patterns)]
+        s = ', '.join(map(str, pattern_table))
+        print(f'Pattern table: {s}')
+        for idx in sorted(set(pattern_indices)):
+            print(f'Pattern #{idx}:')
             print(rows_to_string(mod.patterns[idx].rows))
 
-    sample_indices = [int(s) for s in args.samples.split(',')]
-    for pattern in mod.patterns:
-        for row in pattern.rows:
-            for cell in row:
-                strip_cell(cell, sample_indices)
-
-    # Create new pattern table
-
-    n_played_patterns = len(pattern_indices)
-
-    patterns = []
+    # Install new pattern table
+    new_patterns = []
     old2new = {}
     at = 0
     for idx in pattern_indices:
         if idx not in old2new:
             old2new[idx] = at
-            at +=1
-            patterns.append(mod.patterns[idx])
-    pattern_indices = [old2new[p] for p in pattern_indices]
-    mod.patterns = patterns
+            at += 1
+            new_patterns.append(mod.patterns[idx])
+    new_pattern_table = [old2new[p] for p in pattern_indices]
+    mod.patterns = new_patterns
+    n_played_patterns = len(new_pattern_table)
     mod.n_played_patterns = n_played_patterns
-    pattern_indices += [0] * (128 - n_played_patterns)
-    mod.pattern_table = bytearray(pattern_indices)
+    new_pattern_table += [0] * (128 - n_played_patterns)
+    mod.pattern_table = bytearray(new_pattern_table)
+
+    # Strip effects
+    for pattern in mod.patterns:
+        for row in pattern.rows:
+            for cell in row:
+                strip_cell(cell, sample_indices)
 
     with args.output as outf:
         outf.write(Module.build(mod))
