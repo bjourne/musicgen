@@ -20,7 +20,7 @@ def mod_note_volume(mod, cell):
 def mod_notes(mod, rows, col_idx):
     tempo = DEFAULT_TEMPO
     speed = DEFAULT_SPEED
-    for i, row in enumerate(rows):
+    for row_idx, row in enumerate(rows):
         tempo, speed = update_timings(row, tempo, speed)
         row_time_ms = int(calc_row_time(tempo, speed) * 1000)
 
@@ -28,9 +28,10 @@ def mod_notes(mod, rows, col_idx):
         period = cell.period
         if period == 0 or cell.sample_idx == 0:
             continue
-        period_idx = PERIOD_TO_IDX[period]
+        period_idx = period_to_idx(period)
         volume = mod_note_volume(mod, cell)
-        yield cell.sample_idx, i, period_idx, volume, row_time_ms
+        yield (cell.sample_idx, row_idx, col_idx,
+               period_idx, volume, row_time_ms)
 
 def note_duration(notes, i, row_idx, note_dur):
     if i < len(notes) - 1:
@@ -42,7 +43,8 @@ def midi_notes(conv_info, notes):
     offset_ms = 0
     last_row_idx = 0
     for i in range(len(notes)):
-        sample_idx, row_idx, period_idx, volume, row_time_ms = notes[i]
+        sample_idx, row_idx, col_idx, period_idx, volume, row_time_ms \
+            = notes[i]
         row_delta = row_idx - last_row_idx
 
         # Update time
@@ -52,31 +54,40 @@ def midi_notes(conv_info, notes):
         program, midi_idx_base, note_dur, vol_adj = conv_info[sample_idx]
         note_dur = note_duration(notes, i, row_idx, note_dur)
 
-        # Handling for drums
+        # -2 indicates filtered notes.
+        if program == -2:
+            continue
+
+        # Drum track
         if program == -1:
             midi_idx = midi_idx_base
+            col_idx = 9
+            program = None
         else:
             midi_idx = midi_idx_base + period_idx
-        velocity = min(int((volume / 64) * 127 * vol_adj), 127)
+        velocity = int(min((volume / 64) * 127 * vol_adj, 127))
 
         note_on = offset_ms
         note_off = offset_ms + note_dur * row_time_ms
 
-        yield program, note_on, 1, midi_idx, velocity
-        yield program, note_off, 0, midi_idx, 0
+        yield col_idx, note_on, 1, program, midi_idx, velocity
 
-def midi_notes_to_track(channel, program, notes):
-    # Jump around the drum channel..
-    if channel >= 9:
-        channel += 1
-    if program == -1:
-        channel = 9
-    else:
-        yield Message('program_change', program = program, time = 0,
-                      channel = channel)
+        # We don't need note offs for drums but it doesn't hurt.
+        yield col_idx, note_off, 0, program, midi_idx, 0
+
+def midi_notes_to_track(channel, notes):
     prev = 0
-    for _, ofs, on_off, midi_idx, velocity in notes:
+    current_program = None
+    for _, ofs, on_off, program, midi_idx, velocity in notes:
         rel_ofs = ofs - prev
+        if program != current_program:
+            current_program = program
+            yield Message('program_change', program = program,
+                          time = rel_ofs,
+                          channel = channel)
+            rel_ofs = 0
+
+
         if on_off == 1:
             yield Message('note_on',
                           note = midi_idx,
@@ -123,9 +134,10 @@ def main():
     notes = sorted(sum(notes_per_channel, []))
 
     note_groups = groupby(notes, lambda el: el[0])
+
     midi = MidiFile(type = 1)
-    for i, (program, note_group) in enumerate(note_groups):
-        track = list(midi_notes_to_track(i, program, note_group))
+    for i, (channel, note_group) in enumerate(note_groups):
+        track = list(midi_notes_to_track(channel, note_group))
         track = MidiTrack(track)
         midi.tracks.append(track)
     midi.save(args.midi.name)
