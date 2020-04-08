@@ -32,7 +32,7 @@ def interp_freq(arr, freq):
     print(fmt % (arr.size, arr_new.size, freq))
     return arr_new
 
-def play_sample_at_freq(sample, freq):
+def play_sample_at_freq(sample, freq, volume):
     arr = sample.arr
     arr = interp_freq(arr, freq)
 
@@ -58,6 +58,9 @@ def play_sample_at_freq(sample, freq):
             body = arr[repeat_from:repeat_to]
             repeated_body = np.tile(body, n_repeats)
             arr = np.concatenate((head, repeated_body, tail))
+    vol_frac = volume / 64
+    arr *= vol_frac
+
     play_sample(arr)
 
 
@@ -70,6 +73,8 @@ def main():
     parser.add_argument('--period',
                         required = True,
                         help = 'Sample period')
+    parser.add_argument('--volume',
+                        type = int)
     args = parser.parse_args()
     with args.module as inf:
         mod = Module.parse(inf.read())
@@ -80,11 +85,12 @@ def main():
     sample_indices = [int(s) - 1 for s in args.samples.split(',')]
     note_idx = notestr_to_index(args.period)
     freq = FREQS[note_idx]
-
     for sample_idx in sample_indices:
         header = mod.sample_headers[sample_idx]
         name = header.name.decode('utf-8', 'ignore')
-        volume = header.volume
+        volume = args.volume
+        if not args.volume:
+            volume = header.volume
         fine_tune = header.fine_tune
         sample = samples[sample_idx]
 
@@ -96,39 +102,7 @@ def main():
         print(f'Repeat from: {sample.repeat_from}')
         print(f'Repeat len : {sample.repeat_len}')
 
-        play_sample_at_freq(sample, freq)
-    return
-
-    arr = sample.arr
-    note_idx = notestr_to_index(args.period)
-    freq = FREQS[note_idx]
-    arr = interp_freq(arr, freq)
-
-    # Duration in nr of samples if repeating
-    n_samples = int(SAMPLE_RATE * 2.0)
-
-    # Repeating
-    repeat_from = sample.repeat_from
-    repeat_len = sample.repeat_len
-
-    ratio = arr.size / sample.arr.size
-    repeat_from = int(repeat_from * ratio)
-    repeat_len = int(repeat_len * ratio)
-
-    if repeat_len:
-        repeat_to = repeat_from + repeat_len
-        n_tail = arr.size - repeat_to
-        repeat_body_len = n_samples - arr.size + repeat_len
-        if repeat_body_len > repeat_len:
-            n_repeats = int(repeat_body_len / repeat_len)
-            head = arr[:repeat_from]
-            tail = arr[repeat_to:]
-            body = arr[repeat_from:repeat_to]
-            repeated_body = np.tile(body, n_repeats)
-            arr = np.concatenate((head, repeated_body, tail))
-
-
-    play_sample(arr)
+        play_sample_at_freq(sample, freq, volume)
 
 if __name__ == '__main__':
     main()
