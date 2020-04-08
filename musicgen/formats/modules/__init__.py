@@ -138,14 +138,16 @@ class Sample:
 
         ratio = SAMPLE_RATE / AMIGA_SAMPLE_RATE
         n_samples = int(arr.size * ratio)
-
-        x_old = np.linspace(0, 1, arr.size)
-        x_new = np.linspace(0, 1, n_samples)
         if arr.size:
+            x_old = np.linspace(0, 1, arr.size)
+            x_new = np.linspace(0, 1, n_samples)
             arr = np.interp(x_new, x_old, arr)
         self.arr = arr.astype(np.float)
-        self.repeat_from = round(2 * repeat_from * ratio)
-        self.repeat_len = round(2 * repeat_len * ratio)
+        if repeat_len > 1:
+            self.repeat_from = round(2 * repeat_from * ratio)
+            self.repeat_len = round(2 * repeat_len * ratio)
+        else:
+            self.repeat_from = self.repeat_len = 0
 
 def load_samples(mod):
     return [Sample(data.bytes, header.repeat_from, header.repeat_len)
