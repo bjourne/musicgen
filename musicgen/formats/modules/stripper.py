@@ -20,43 +20,7 @@ def strip_cell(cell, sample_indices):
     if cell.sample_idx == 0 and cell.effect_cmd == 12:
         zero_effect(cell)
 
-def main():
-    parser = ArgumentParser(description='Module stripper')
-    parser.add_argument('input', type = FileType('rb'))
-    parser.add_argument('output', type = FileType('wb'))
-    parser.add_argument('--samples',
-                        required = False,
-                        help = 'Samples to keep')
-    parser.add_argument('--pattern-table',
-                        required = True,
-                        help = 'Pattern table')
-    parser.add_argument('--info',
-                        help = 'Print module information',
-                        action = 'store_true')
-    args = parser.parse_args()
-    with args.input as inf:
-        mod = Module.parse(inf.read())
-
-    # Parse pattern indices
-    pattern_indices = [int(p) for p in args.pattern_table.split(',')]
-
-    # Parse sample indices
-    if not args.samples:
-        sample_indices = list(range(32))
-    else:
-        sample_indices = [int(s) for s in args.samples.split(',')]
-
-    # Print pattern table
-    if args.info:
-        pattern_table = [mod.pattern_table[i]
-                         for i in range(mod.n_played_patterns)]
-        s = ', '.join(map(str, pattern_table))
-        print(f'Pattern table: {s}')
-        for idx in sorted(set(pattern_indices)):
-            print(f'Pattern #{idx}:')
-            print(rows_to_string(mod.patterns[idx].rows))
-
-    # Install new pattern table
+def update_pattern_table(mod, pattern_indices):
     new_patterns = []
     old2new = {}
     at = 0
@@ -71,6 +35,49 @@ def main():
     mod.n_played_patterns = n_played_patterns
     new_pattern_table += [0] * (128 - n_played_patterns)
     mod.pattern_table = bytearray(new_pattern_table)
+
+
+def main():
+    parser = ArgumentParser(description='Module stripper')
+    parser.add_argument('input', type = FileType('rb'))
+    parser.add_argument('output', type = FileType('wb'))
+    parser.add_argument('--samples',
+                        required = False,
+                        help = 'Samples to keep')
+    parser.add_argument('--pattern-table',
+                        help = 'Pattern table')
+    parser.add_argument('--info',
+                        help = 'Print module information',
+                        action = 'store_true')
+    args = parser.parse_args()
+    with args.input as inf:
+        mod = Module.parse(inf.read())
+
+
+
+    # Parse sample indices
+    if not args.samples:
+        sample_indices = list(range(32))
+    else:
+        sample_indices = [int(s) for s in args.samples.split(',')]
+
+    # Print pattern table
+    if args.info:
+        pattern_table = [mod.pattern_table[i]
+                         for i in range(mod.n_played_patterns)]
+        s = ', '.join(map(str, pattern_table))
+        print(f'Pattern table: {s}')
+
+
+    if args.pattern_table:
+        # Parse pattern indices
+        pattern_indices = [int(p) for p in args.pattern_table.split(',')]
+        if args.info:
+            for idx in sorted(set(pattern_indices)):
+                print(f'Pattern #{idx}:')
+                print(rows_to_string(mod.patterns[idx].rows))
+        # Install new pattern table
+        update_pattern_table(mod, pattern_indices)
 
     # Strip effects
     for pattern in mod.patterns:
