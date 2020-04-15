@@ -6,6 +6,7 @@ from pygame.mixer import (Channel, get_busy, init, pre_init,
                           set_num_channels)
 from pygame.sndarray import make_sound
 from time import sleep
+import numpy as np
 
 def wait_for_channels():
     while get_busy() or any(Channel(i).get_queue() for i in range(4)):
@@ -18,6 +19,7 @@ def init_player(sr):
     for i in range(4):
         Channel(i).stop()
     wait_for_channels()
+    sleep(2)
 
 def play_sample(arr):
     snd = make_sound(arr.astype(np.int16))
@@ -36,28 +38,9 @@ def play_sample_at_freq(sample, freq, volume):
     arr = sample.arr
     arr = interp_freq(arr, freq)
 
-    # Duration in nr of samples if repeating
-    n_samples = int(SAMPLE_RATE * 2.0)
-
     # Repeating
-    repeat_from = sample.repeat_from
-    repeat_len = sample.repeat_len
+    arr = repeat_sample(sample, arr, 1.0)
 
-    ratio = arr.size / sample.arr.size
-    repeat_from = int(repeat_from * ratio)
-    repeat_len = int(repeat_len * ratio)
-
-    if repeat_len:
-        repeat_to = repeat_from + repeat_len
-        n_tail = arr.size - repeat_to
-        repeat_body_len = n_samples - arr.size + repeat_len
-        if repeat_body_len > repeat_len:
-            n_repeats = int(repeat_body_len / repeat_len)
-            head = arr[:repeat_from]
-            tail = arr[repeat_to:]
-            body = arr[repeat_from:repeat_to]
-            repeated_body = np.tile(body, n_repeats)
-            arr = np.concatenate((head, repeated_body, tail))
     vol_frac = volume / 64
     arr *= vol_frac
 
@@ -94,8 +77,7 @@ def main():
         fine_tune = header.fine_tune
         sample = samples[sample_idx]
 
-        print('-------------------------------')
-        print(f'Sample name: {name}')
+        print(f'*** Sample "{name}" (#{sample_idx + 1}) ***')
         print(f'Volume     : {volume}')
         print(f'Fine tune  : {fine_tune}')
         print(f'Length     : {len(sample.arr)}')
@@ -103,6 +85,7 @@ def main():
         print(f'Repeat len : {sample.repeat_len}')
 
         play_sample_at_freq(sample, freq, volume)
+        sleep(0.5)
 
 if __name__ == '__main__':
     main()

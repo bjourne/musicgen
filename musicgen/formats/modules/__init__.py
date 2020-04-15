@@ -152,3 +152,34 @@ class Sample:
 def load_samples(mod):
     return [Sample(data.bytes, header.repeat_from, header.repeat_len)
             for data, header in zip(mod.samples, mod.sample_headers)]
+
+########################################################################
+# Mathy stuff
+########################################################################
+def repeat_sample(sample, arr, dur_s):
+    '''
+    arr is the frequency interpolated sample array.
+    '''
+    # Duration in nr of samples if repeating
+    n_samples = int(SAMPLE_RATE * dur_s)
+
+    # Repeating
+    repeat_from = sample.repeat_from
+    repeat_len = sample.repeat_len
+
+    ratio = arr.size / sample.arr.size
+    repeat_from = int(repeat_from * ratio)
+    repeat_len = int(repeat_len * ratio)
+
+    if repeat_len:
+        repeat_to = repeat_from + repeat_len
+        n_tail = arr.size - repeat_to
+        repeat_body_len = n_samples - arr.size + repeat_len
+        if repeat_body_len > repeat_len:
+            n_repeats = int(repeat_body_len / repeat_len)
+            head = arr[:repeat_from]
+            tail = arr[repeat_to:]
+            body = arr[repeat_from:repeat_to]
+            repeated_body = np.tile(body, n_repeats)
+            arr = np.concatenate((head, repeated_body, tail))
+    return arr
