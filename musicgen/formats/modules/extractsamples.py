@@ -24,7 +24,7 @@ def main():
     samples = load_samples(mod)
     name_prefix = splitext(basename(args.module.name))[0]
     for idx, sample in enumerate(samples):
-        fname = '%s-%02d.wav' % (name_prefix, idx)
+        fname = '%s-%02d.wav' % (name_prefix, idx + 1)
         write_sample(sample, fname)
 
 if __name__ == '__main__':
