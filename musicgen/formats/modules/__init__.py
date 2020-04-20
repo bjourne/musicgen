@@ -142,13 +142,18 @@ def notes_in_rows(mod, rows):
     '''
     tempo = DEFAULT_TEMPO
     speed = DEFAULT_SPEED
+    channel_periods = {}
     for row_idx, row in enumerate(rows):
         tempo, speed = update_timings(row, tempo, speed)
         time_ms = int(calc_row_time(tempo, speed) * 1000)
         for col_idx, cell in enumerate(row):
-            period = cell.period
-            if period == 0 or cell.sample_idx == 0:
+            if not cell.sample_idx:
                 continue
+            # Might not be a period supplied.
+            period = cell.period
+            if not period:
+                period = channel_periods[col_idx]
+            channel_periods[col_idx] = period
             note_idx = period_to_idx(period)
             vol = mod_note_volume(mod, cell)
             sample_idx = cell.sample_idx

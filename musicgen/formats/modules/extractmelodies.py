@@ -3,6 +3,7 @@ from argparse import ArgumentParser, FileType
 from itertools import groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.parser import *
+from sys import exit
 
 def group_completion(buf,
                      last_sample, last_time,
@@ -70,7 +71,6 @@ def extract_sample_groups(rows, col_idx,
             cell.effect_cmd = 0
             cell.effect_arg1 = 0
             cell.effect_arg2 = 0
-
         buf.append(cell)
     yield buf, 'last_one'
 
@@ -114,17 +114,15 @@ def build_cell(sample, note, effect_cmd, effect_arg):
 ZERO_CELL = build_cell(0, -1, 0, 0)
 ZERO_CELL_SILENCE = build_cell(0, -1, 0xc, 0)
 
-def fix_trailer(cells, end_length):
-    fixed_cells = []
-    buf = []
-    for cell in cells:
-        if cell.sample_idx != 0 or cell.effect_cmd != 0:
-            fixed_cells.extend(buf)
-            buf = []
-        buf.append(cell)
+def add_trailer(melody, end_length):
     end_length_2 = end_length // 2
-    return fixed_cells \
-        + [ZERO_CELL] * end_length_2 + [ZERO_CELL_SILENCE] * end_length_2
+    return melody + [ZERO_CELL] * end_length_2 \
+        + [ZERO_CELL_SILENCE] * end_length_2
+
+def remove_ending_silence(melody):
+    last_idx = [i for i, c in enumerate(melody)
+                if c.sample_idx != 0 or c.effect_cmd != 0][-1]
+    return melody[:last_idx + 1]
 
 def rows_to_pattern(rows):
     zero_cell_row = [ZERO_CELL] * 4
@@ -162,6 +160,9 @@ def main():
     parser.add_argument(
         '--mu-threshold', type = int, default = 5,
         help = 'minimum number of notes before measuring the mu factor')
+    parser.add_argument(
+        '--info', action = 'store_true',
+        help = 'print debug stuff')
 
     args = parser.parse_args()
     with args.input_module as inf:
@@ -176,16 +177,27 @@ def main():
                                     args.mu_threshold))
          for col_idx in range(4)], [])
 
-    groups = [group for (group, msg) in groups
-              if is_group_melody(group,
-                                 args.min_length,
-                                 args.min_unique,
-                                 args.max_repeat)]
+    melodies = [group for (group, msg) in groups
+                if is_group_melody(group,
+                                   args.min_length,
+                                   args.min_unique,
+                                   args.max_repeat)]
 
-    groups = filter_duplicate_melodies(groups)
+    melodies = [remove_ending_silence(melody)
+                for melody in filter_duplicate_melodies(melodies)]
+    if args.info:
+        print('=== MELODIES ===')
+        for melody in melodies:
+            print('\n'.join(cell_to_string(c) for c in melody))
+            print()
+    melodies = [add_trailer(melody, args.trailer) for melody in melodies]
+    if not melodies:
+        fmt = 'Sorry, found no melodies in "%s"!'
+        print(fmt % args.input_module.name)
+        exit(1)
 
-    groups = [fix_trailer(group, args.trailer) for group in groups]
-    cells = sum(groups, [])
+
+    cells = sum(melodies, [])
     rows = [[c, ZERO_CELL, ZERO_CELL, ZERO_CELL] for c in cells]
 
     patterns = list(rows_to_patterns(rows))
