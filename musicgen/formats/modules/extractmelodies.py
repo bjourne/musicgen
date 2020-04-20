@@ -4,8 +4,78 @@ from itertools import groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.parser import *
 
-def is_melody(melody, min_length, min_notes, max_repeat):
-    notes = [n for (s, r, n) in melody]
+def group_completion(buf,
+                     last_sample, last_time,
+                     sample, time, row_delta,
+                     max_distance, mu_factor, mu_threshold):
+
+    if last_sample != sample:
+        return True, 'sample_change (%d -> %d)' % (last_sample, sample)
+    if last_time != time:
+        return True, 'tempo_change'
+    if row_delta > max_distance:
+        return True, 'notes_apart'
+
+    # Rows containing notes
+    rows = [i for i, cell in enumerate(buf) if cell.sample_idx != 0]
+    n_rows = len(rows)
+    if n_rows < mu_threshold:
+        return False, 'less_than_mu_threshold'
+
+    diff_sum = sum(y - x for (x, y) in zip(rows, rows[1:]))
+    avg_diff = diff_sum / (n_rows - 1)
+
+    if row_delta > avg_diff * mu_factor:
+        return True, 'exceeds_mu_factor'
+    return False, 'no'
+
+def extract_sample_groups(rows, col_idx,
+                          max_distance, mu_factor, mu_threshold):
+    tempo = DEFAULT_TEMPO
+    speed = DEFAULT_SPEED
+    last_time = None
+    last_sample = None
+    last_row = None
+    buf = []
+
+    for row_idx, row in enumerate(rows):
+        tempo, speed = update_timings(row, tempo, speed)
+        time = int(calc_row_time(tempo, speed) * 1000)
+        cell = row[col_idx]
+        sample = cell.sample_idx
+        if last_sample is None:
+            last_sample = sample
+        if last_time is None:
+            last_time = time
+        if last_row is None:
+            last_row = row_idx
+
+        if sample != 0:
+            row_delta = row_idx - last_row
+            status, msg = group_completion(
+                buf,
+                last_sample, last_time,
+                sample, time,
+                row_delta,
+                max_distance, mu_factor, mu_threshold)
+            if status:
+                yield buf, msg
+                buf = []
+            last_sample = sample
+            last_row = row_idx
+            last_time = time
+
+        # Remove pattern jumps and tempo changes
+        if cell.effect_cmd in (0xb, 0xd, 0xf):
+            cell.effect_cmd = 0
+            cell.effect_arg1 = 0
+            cell.effect_arg2 = 0
+
+        buf.append(cell)
+    yield buf, 'last_one'
+
+def is_group_melody(cells, min_length, min_notes, max_repeat):
+    notes = [c.period for c in cells if c.sample_idx != 0]
     if len(notes) < min_length:
         return False
     if len(set(notes)) < min_notes:
@@ -15,44 +85,17 @@ def is_melody(melody, min_length, min_notes, max_repeat):
         return False
     return True
 
-def chunk_notes(notes, max_dist):
-    buf = []
-    at_row = None
-    at_time = None
-    for col, row, s, n, vol, time_ms in notes:
-        if at_row is None:
-            at_row = row
-        if at_time is None:
-            at_time = time_ms
-        # Either notes are to far apart or the tempo changes.
-        if (row - at_row > max_dist) or at_time != time_ms:
-            yield buf
-            buf = []
-        buf.append((col, row, s, n))
-        at_row = row
-        at_time = time_ms
-    yield buf
-
-def note_melodies(notes, min_length, min_notes, max_repeat, max_dist):
-    # Sort and group by column
-    notes = sorted(notes, key = lambda r: r[0])
-    notes_per_col = groupby(notes, lambda r: r[0])
+def filter_duplicate_melodies(melodies):
     seen = set()
-    for col, group1 in notes_per_col:
-        notes_per_sample = groupby(list(group1), lambda r: r[2])
-        for sample, group2 in notes_per_sample:
-            for group3 in chunk_notes(group2, max_dist):
-                melody = list(group3)
-                base_row = melody[0][1]
-                melody = tuple((s, r - base_row, n)
-                               for (c, r, s, n) in melody)
-                ok = is_melody(melody, min_length, min_notes, max_repeat)
-                if melody in seen or not ok:
-                    continue
-                yield melody
-                seen.add(melody)
+    for melody in melodies:
+        signature = tuple((c.sample_idx, i, c.period)
+                          for i,c in enumerate(melody)
+                          if c.sample_idx != 0)
+        if not signature in seen:
+            yield melody
+        seen.add(signature)
 
-def build_cell_row(sample, note, effect_cmd, effect_arg):
+def build_cell(sample, note, effect_cmd, effect_arg):
     if note == -1:
         period = 0
     else:
@@ -61,40 +104,32 @@ def build_cell_row(sample, note, effect_cmd, effect_arg):
     sample_hi = sample >> 4
     effect_arg1 = effect_arg & 0xf
     effect_arg2 = effect_arg >> 4
-    cell = dict(period = period,
+    return dict(period = period,
                 sample_lo = sample_lo,
                 sample_hi = sample_hi,
                 effect_cmd = effect_cmd,
                 effect_arg1 = effect_arg1,
                 effect_arg2 = effect_arg2)
-    zero_cell = dict(period = 0,
-                     sample_lo = 0,
-                     sample_hi = 0,
-                     effect_cmd = 0,
-                     effect_arg1 = 0,
-                     effect_arg2 = 0)
-    return [cell, zero_cell, zero_cell, zero_cell]
 
-ZERO_CELL_ROW = build_cell_row(0, -1, 0, 0)
-ZERO_CELL_ROW_SILENCE = build_cell_row(0, -1, 0xc, 0)
+ZERO_CELL = build_cell(0, -1, 0, 0)
+ZERO_CELL_SILENCE = build_cell(0, -1, 0xc, 0)
 
-def melody_to_rows(melody, end_length):
-    at = 0
-    for sample, rel_row, period in melody:
-        while at < rel_row:
-            yield ZERO_CELL_ROW
-            at += 1
-        yield build_cell_row(sample, period, 0, 0)
-        at += 1
-    for _ in range(end_length // 2):
-        yield ZERO_CELL_ROW
-    for _ in range(end_length // 2):
-        yield ZERO_CELL_ROW_SILENCE
-
+def fix_trailer(cells, end_length):
+    fixed_cells = []
+    buf = []
+    for cell in cells:
+        if cell.sample_idx != 0 or cell.effect_cmd != 0:
+            fixed_cells.extend(buf)
+            buf = []
+        buf.append(cell)
+    end_length_2 = end_length // 2
+    return fixed_cells \
+        + [ZERO_CELL] * end_length_2 + [ZERO_CELL_SILENCE] * end_length_2
 
 def rows_to_pattern(rows):
+    zero_cell_row = [ZERO_CELL] * 4
     n = len(rows)
-    rows = rows + [ZERO_CELL_ROW] * (64 - n)
+    rows = rows + [zero_cell_row] * (64 - n)
     return rows
 
 def rows_to_patterns(rows):
@@ -121,22 +156,39 @@ def main():
     parser.add_argument(
         '--max-distance', type = int, required = True,
         help = 'maximum distance between notes in a melody')
-    args = parser.parse_args()
+    parser.add_argument(
+        '--mu-factor', type = float, default = 3.0,
+        help = 'maximum factor of mean note distance allowed')
+    parser.add_argument(
+        '--mu-threshold', type = int, default = 5,
+        help = 'minimum number of notes before measuring the mu factor')
 
+    args = parser.parse_args()
     with args.input_module as inf:
         mod = Module.parse(inf.read())
 
     rows = linearize_rows(mod)
-    notes = notes_in_rows(mod, rows)
-    melodies = note_melodies(notes,
-                             args.min_length,
-                             args.min_unique,
-                             args.max_repeat,
-                             args.max_distance)
-    rows_out = sum([list(melody_to_rows(melody, args.trailer))
-                    for melody in melodies], [])
 
-    patterns = list(rows_to_patterns(rows_out))
+    groups = sum(
+        [list(extract_sample_groups(rows, col_idx,
+                                    args.max_distance,
+                                    args.mu_factor,
+                                    args.mu_threshold))
+         for col_idx in range(4)], [])
+
+    groups = [group for (group, msg) in groups
+              if is_group_melody(group,
+                                 args.min_length,
+                                 args.min_unique,
+                                 args.max_repeat)]
+
+    groups = filter_duplicate_melodies(groups)
+
+    groups = [fix_trailer(group, args.trailer) for group in groups]
+    cells = sum(groups, [])
+    rows = [[c, ZERO_CELL, ZERO_CELL, ZERO_CELL] for c in cells]
+
+    patterns = list(rows_to_patterns(rows))
     n_patterns = len(patterns)
 
     pattern_table = list(range(n_patterns)) + [0] * (128 - n_patterns)
