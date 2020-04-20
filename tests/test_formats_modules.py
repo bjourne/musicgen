@@ -15,3 +15,8 @@ def test_load_samples():
     mod = load(TEST_PATH / 'entity.mod')
     samples = load_samples(mod)
     assert samples[13].repeat_len == 0
+
+def test_pattern_jump():
+    mod = load(TEST_PATH / 'wax-rmx.mod')
+    rows = linearize_rows(mod)
+    assert len(rows) == 2640

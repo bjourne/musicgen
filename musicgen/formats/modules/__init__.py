@@ -107,27 +107,32 @@ def linearize_rows(mod):
     table_idx = 0
     rows = []
     jumps_taken = set()
+    next_from = 0
     while table_idx < mod.n_played_patterns:
         pattern_idx = mod.pattern_table[table_idx]
         pattern = mod.patterns[pattern_idx]
-        for i, row in enumerate(pattern.rows):
+        assert len(pattern.rows) == 64
+        for i in range(next_from, 64):
+            row = pattern.rows[i]
             rows.append(row)
             jump = False
+            jump_loc = table_idx, i
             for cell in row:
                 cmd = cell.effect_cmd
-                if cmd == 0xb:
-                    jump_loc = table_idx, i
-                    if not jump_loc in jumps_taken:
-                        table_idx = 16 * cell.effect_arg1 \
-                            + cell.effect_arg2 - 1
-                        jump = True
+                arg1 = cell.effect_arg1
+                arg2 = cell.effect_arg2
+                if cmd == 0xb and not jump_loc in jumps_taken:
+                        table_idx = 16 * arg1 + arg2 - 1
                         jumps_taken.add(jump_loc)
+                        next_from = 0
+                        jump = True
                 elif cmd == 0xd:
-                    next_from = 10 * cell.effect_arg1 + cell.effect_arg2
-                    assert not next_from
+                    next_from = 10 * arg1 + arg2
                     jump = True
             if jump:
                 break
+            else:
+                next_from = 0
         table_idx += 1
     return rows
 
