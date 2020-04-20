@@ -12,27 +12,6 @@ MIDI_C1_IDX = 24
 # Default convert to MIDI instrument 1, with a C-1 note base.
 DEFAULT_CONV = (1, MIDI_C1_IDX, 4, 1.0)
 
-def mod_note_volume(mod, cell):
-    if cell.effect_cmd == 12:
-        return (cell.effect_arg1 << 4) + cell.effect_arg2
-    return mod.sample_headers[cell.sample_idx - 1].volume
-
-def mod_notes(mod, rows, col_idx):
-    tempo = DEFAULT_TEMPO
-    speed = DEFAULT_SPEED
-    for row_idx, row in enumerate(rows):
-        tempo, speed = update_timings(row, tempo, speed)
-        row_time_ms = int(calc_row_time(tempo, speed) * 1000)
-
-        cell = row[col_idx]
-        period = cell.period
-        if period == 0 or cell.sample_idx == 0:
-            continue
-        period_idx = period_to_idx(period)
-        volume = mod_note_volume(mod, cell)
-        yield (cell.sample_idx, row_idx, col_idx,
-               period_idx, volume, row_time_ms)
-
 def note_duration(notes, i, row_idx, note_dur):
     if i < len(notes) - 1:
         next_row_idx = notes[i + 1][1]
@@ -43,15 +22,14 @@ def midi_notes(conv_info, notes):
     offset_ms = 0
     last_row_idx = 0
     for i in range(len(notes)):
-        sample_idx, row_idx, col_idx, period_idx, volume, row_time_ms \
-            = notes[i]
+        col_idx, row_idx, sample, note_idx, vol, row_time_ms = notes[i]
         row_delta = row_idx - last_row_idx
 
         # Update time
         offset_ms += row_delta * row_time_ms
         last_row_idx = row_idx
 
-        program, midi_idx_base, note_dur, vol_adj = conv_info[sample_idx]
+        program, midi_idx_base, note_dur, vol_adj = conv_info[sample]
         note_dur = note_duration(notes, i, row_idx, note_dur)
 
         # -2 indicates filtered notes.
@@ -64,8 +42,8 @@ def midi_notes(conv_info, notes):
             col_idx = 9
             program = None
         else:
-            midi_idx = midi_idx_base + period_idx
-        velocity = int(min((volume / 64) * 127 * vol_adj, 127))
+            midi_idx = midi_idx_base + note_idx
+        velocity = int(min((vol / 64) * 127 * vol_adj, 127))
 
         note_on = offset_ms
         note_off = offset_ms + note_dur * row_time_ms
@@ -125,8 +103,11 @@ def main():
     rows = linearize_rows(mod)
     print(rows_to_string(rows))
 
-    # Extract mod notes
-    notes_per_channel = [list(mod_notes(mod, rows, i)) for i in range(4)]
+    # Extract mod notes and sort/groupby channel
+    notes = notes_in_rows(mod, rows)
+    notes = sorted(notes, key = lambda x: x[0])
+    notes_per_channel = groupby(notes, key = lambda x: x[0])
+    notes_per_channel = [list(grp) for (_, grp) in notes_per_channel]
 
     # Convert to midi notes
     notes_per_channel = [list(midi_notes(conv_info, notes))

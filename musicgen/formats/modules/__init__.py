@@ -100,6 +100,9 @@ def update_timings(row, tempo, speed):
                 tempo = val
     return tempo, speed
 
+########################################################################
+# Data extraction
+########################################################################
 def linearize_rows(mod):
     table_idx = 0
     rows = []
@@ -127,6 +130,29 @@ def linearize_rows(mod):
                 break
         table_idx += 1
     return rows
+
+def mod_note_volume(mod, cell):
+    if cell.effect_cmd == 12:
+        return (cell.effect_arg1 << 4) + cell.effect_arg2
+    return mod.sample_headers[cell.sample_idx - 1].volume
+
+def notes_in_rows(mod, rows):
+    '''
+    Order is (col, row, sample, note, vol, ms)
+    '''
+    tempo = DEFAULT_TEMPO
+    speed = DEFAULT_SPEED
+    for row_idx, row in enumerate(rows):
+        tempo, speed = update_timings(row, tempo, speed)
+        time_ms = int(calc_row_time(tempo, speed) * 1000)
+        for col_idx, cell in enumerate(row):
+            period = cell.period
+            if period == 0 or cell.sample_idx == 0:
+                continue
+            note_idx = period_to_idx(period)
+            vol = mod_note_volume(mod, cell)
+            sample_idx = cell.sample_idx
+            yield (col_idx, row_idx, sample_idx, note_idx, vol, time_ms)
 
 ########################################################################
 # Sample management
