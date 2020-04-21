@@ -108,7 +108,7 @@ def linearize_rows(mod):
     rows = []
     jumps_taken = set()
     next_from = 0
-    while table_idx < mod.n_played_patterns:
+    while table_idx < mod.n_orders:
         pattern_idx = mod.pattern_table[table_idx]
         pattern = mod.patterns[pattern_idx]
         assert len(pattern.rows) == 64

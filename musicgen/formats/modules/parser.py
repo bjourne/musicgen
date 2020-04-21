@@ -41,14 +41,50 @@ SampleData = Struct(
 Module = Struct(
     'title' / PaddedString(20, 'utf-8'),
     'sample_headers' / Array(31, SampleHeader),
-    'n_played_patterns' / Byte,
-    Padding(1),
+    'n_orders' / Byte,
+    'restart_pos' / Byte,
     'pattern_table' / Bytes(128),
     'initials' / Const(b'M.K.'),
     'patterns' / Array(max_(this.pattern_table) + 1, Pattern),
-    'samples' / Array(31, SampleData))
+    'samples' / Array(31, SampleData),
+    'integrity' / Check(0 <= this.n_orders <= 128))
 
-def load(fname):
+ModuleSTK = Struct(
+    'title' / PaddedString(20, 'utf-8'),
+    'sample_headers' / Array(15, SampleHeader),
+    'n_orders' / Byte,
+    'restart_pos' / Byte,
+    'pattern_table' / Array(128, Byte),
+    'patterns' / Array(max_(this.pattern_table) + 1, Pattern),
+    'samples' / Array(15, SampleData),
+    'integrity' / Check(0 <= this.n_orders <= 128)
+    )
+
+def load_file(fname):
     with open(fname, 'rb') as f:
         arr = bytearray(f.read())
-    return Module.parse(arr)
+    magic = arr[1080:1084].decode('utf-8')
+    if not magic.isprintable():
+        print(f'{fname} is an STK. file')
+        return ModuleSTK.parse(arr)
+    elif magic == 'M.K.':
+        return Module.parse(arr)
+    raise ValueError(f'Unknown magic "{magic}"!')
+
+def save_file(fname, mod):
+    if type(mod) == dict:
+        samples = mod['samples']
+    else:
+        samples = mod.samples
+    cls = Module if len(samples) == 31 else ModuleSTK
+    with open(fname, 'wb') as f:
+        f.write(cls.build(mod))
+
+def main():
+    from sys import argv
+    from musicgen.formats.modules import pattern_to_string
+    mod = load_file(argv[1])
+    print(pattern_to_string(mod.patterns[0]))
+
+if __name__ == '__main__':
+    main()

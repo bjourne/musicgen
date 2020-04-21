@@ -1,7 +1,7 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from argparse import ArgumentParser, FileType
 from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import Module
+from musicgen.formats.modules.parser import load_file, save_file
 
 def zero_effect(cell):
     cell.effect_cmd = 0
@@ -50,10 +50,9 @@ def main():
                         help = 'Print module information',
                         action = 'store_true')
     args = parser.parse_args()
-    with args.input as inf:
-        mod = Module.parse(inf.read())
-
-
+    args.input.close()
+    args.output.close()
+    mod = load_file(args.input.name)
 
     # Parse sample indices
     if not args.samples:
@@ -63,8 +62,7 @@ def main():
 
     # Print pattern table
     if args.info:
-        pattern_table = [mod.pattern_table[i]
-                         for i in range(mod.n_played_patterns)]
+        pattern_table = [mod.pattern_table[i] for i in range(mod.n_orders)]
         s = ', '.join(map(str, pattern_table))
         print(f'Pattern table: {s}')
 
@@ -84,9 +82,7 @@ def main():
         for row in pattern.rows:
             for cell in row:
                 strip_cell(cell, sample_indices)
-
-    with args.output as outf:
-        outf.write(Module.build(mod))
+    save_file(args.output.name, mod)
 
 if __name__ == '__main__':
     main()

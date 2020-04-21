@@ -1,7 +1,7 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from argparse import ArgumentParser, FileType
 from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import Module
+from musicgen.formats.modules.parser import load_file
 from os.path import basename, splitext
 from wave import open as wave_open
 import numpy as np
@@ -18,9 +18,8 @@ def main():
         description = 'Extract samples from MOD files')
     parser.add_argument('module', type = FileType('rb'))
     args = parser.parse_args()
-
-    with args.module as inf:
-        mod = Module.parse(inf.read())
+    args.module.close()
+    mod = load_file(args.module.name)
     samples = load_samples(mod)
     name_prefix = splitext(basename(args.module.name))[0]
     for idx, sample in enumerate(samples):

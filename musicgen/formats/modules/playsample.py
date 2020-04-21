@@ -1,7 +1,7 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from argparse import ArgumentParser, FileType
 from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import Module
+from musicgen.formats.modules.parser import load_file
 from pygame.mixer import (Channel, get_busy, init, pre_init,
                           set_num_channels)
 from pygame.sndarray import make_sound
@@ -59,8 +59,9 @@ def main():
     parser.add_argument('--volume',
                         type = int)
     args = parser.parse_args()
-    with args.module as inf:
-        mod = Module.parse(inf.read())
+    args.module.close()
+
+    mod = load_file(args.module.name)
     samples = load_samples(mod)
 
     init_player(SAMPLE_RATE)

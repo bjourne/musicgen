@@ -1,19 +1,22 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from argparse import ArgumentParser, FileType
+from construct import Container
 from itertools import groupby
 from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import *
+from musicgen.formats.modules.parser import load_file, save_file
 from sys import exit
 
 def group_completion(buf,
-                     last_sample, last_time,
-                     sample, time, row_delta,
+                     last_sample, sample,
+                     last_timing, timing,
+                     row_delta,
                      max_distance, mu_factor, mu_threshold):
 
     if last_sample != sample:
         return True, 'sample_change (%d -> %d)' % (last_sample, sample)
-    if last_time != time:
+    if last_timing != timing:
         return True, 'tempo_change'
+
     if row_delta > max_distance:
         return True, 'notes_apart'
 
@@ -30,51 +33,70 @@ def group_completion(buf,
         return True, 'exceeds_mu_factor'
     return False, 'no'
 
+def build_cell(sample, note, effect_cmd, effect_arg):
+    if note == -1:
+        period = 0
+    else:
+        period = PERIODS[note]
+    sample_lo = sample & 0xf
+    sample_hi = sample >> 4
+    effect_arg1 = effect_arg >> 4
+    effect_arg2 = effect_arg & 0xf
+    return dict(period = period,
+                sample_lo = sample_lo,
+                sample_hi = sample_hi,
+                sample_idx = sample_hi << 4 + sample_lo,
+                effect_cmd = effect_cmd,
+                effect_arg1 = effect_arg1,
+                effect_arg2 = effect_arg2)
+
 def extract_sample_groups(rows, col_idx,
                           max_distance, mu_factor, mu_threshold):
-    tempo = DEFAULT_TEMPO
-    speed = DEFAULT_SPEED
-    last_time = None
+    # Tempo and speed
+    timing = DEFAULT_TEMPO, DEFAULT_SPEED
+    last_timing = None
     last_sample = None
-    last_row = None
+    last_sample_row = None
     buf = []
 
     for row_idx, row in enumerate(rows):
-        tempo, speed = update_timings(row, tempo, speed)
-        time = int(calc_row_time(tempo, speed) * 1000)
+        timing = update_timings(row, *timing)
         cell = row[col_idx]
         sample = cell.sample_idx
         if last_sample is None:
             last_sample = sample
-        if last_time is None:
-            last_time = time
-        if last_row is None:
-            last_row = row_idx
+        if last_sample_row is None:
+            last_sample_row = row_idx
+        if last_timing is None:
+            last_timing = timing
 
         if sample != 0:
-            row_delta = row_idx - last_row
+            row_delta = row_idx - last_sample_row
             status, msg = group_completion(
                 buf,
-                last_sample, last_time,
-                sample, time,
+                last_sample, sample,
+                last_timing, timing,
                 row_delta,
                 max_distance, mu_factor, mu_threshold)
             if status:
-                yield buf, msg
+                # Emit timing info.
+                speed = last_timing[1]
+                timing_cell = Container(build_cell(0, -1, 0xf, speed))
+                yield [timing_cell] + buf, msg
                 buf = []
             last_sample = sample
-            last_row = row_idx
-            last_time = time
+            last_sample_row = row_idx
+            last_timing = timing
 
-        # Remove pattern jumps and tempo changes
-        if cell.effect_cmd in (0xb, 0xd, 0xf):
+        # Remove pattern jumps
+        if cell.effect_cmd in (0xb, 0xd):
             cell.effect_cmd = 0
             cell.effect_arg1 = 0
             cell.effect_arg2 = 0
         buf.append(cell)
     yield buf, 'last_one'
 
-def is_group_melody(cells, min_length, min_notes, max_repeat):
+def is_melody(cells, min_length, min_notes, max_repeat):
     notes = [c.period for c in cells if c.sample_idx != 0]
     if len(notes) < min_length:
         return False
@@ -85,6 +107,23 @@ def is_group_melody(cells, min_length, min_notes, max_repeat):
         return False
     return True
 
+def move_to_c(cells):
+    notes = [period_to_idx(c.period) for c in cells if c.period != 0]
+
+    first_note_in_octave = notes[0] % 12
+    if first_note_in_octave <= 6:
+        delta = -first_note_in_octave
+    else:
+        delta = 12 - first_note_in_octave
+
+    c_offset = notes[0] % 12
+    for c in cells:
+        if c.period != 0:
+            new_note = period_to_idx(c.period) + delta
+            assert 0 <= new_note < len(PERIODS)
+            c.period = PERIODS[new_note]
+    return cells
+
 def filter_duplicate_melodies(melodies):
     seen = set()
     for melody in melodies:
@@ -94,22 +133,6 @@ def filter_duplicate_melodies(melodies):
         if not signature in seen:
             yield melody
         seen.add(signature)
-
-def build_cell(sample, note, effect_cmd, effect_arg):
-    if note == -1:
-        period = 0
-    else:
-        period = PERIODS[note]
-    sample_lo = sample & 0xf
-    sample_hi = sample >> 4
-    effect_arg1 = effect_arg & 0xf
-    effect_arg2 = effect_arg >> 4
-    return dict(period = period,
-                sample_lo = sample_lo,
-                sample_hi = sample_hi,
-                effect_cmd = effect_cmd,
-                effect_arg1 = effect_arg1,
-                effect_arg2 = effect_arg2)
 
 ZERO_CELL = build_cell(0, -1, 0, 0)
 ZERO_CELL_SILENCE = build_cell(0, -1, 0xc, 0)
@@ -161,27 +184,36 @@ def main():
         '--mu-threshold', type = int, default = 5,
         help = 'minimum number of notes before measuring the mu factor')
     parser.add_argument(
+        '--transpose',
+        help = 'transpose all melodies to c',
+        type = eval,
+        choices = [True, False],
+        default = 'True')
+    parser.add_argument(
         '--info', action = 'store_true',
         help = 'print debug stuff')
 
     args = parser.parse_args()
-    with args.input_module as inf:
-        mod = Module.parse(inf.read())
-
+    args.input_module.close()
+    args.output_module.close()
+    mod = load_file(args.input_module.name)
     rows = linearize_rows(mod)
 
-    groups = sum(
+    melodies = sum(
         [list(extract_sample_groups(rows, col_idx,
                                     args.max_distance,
                                     args.mu_factor,
                                     args.mu_threshold))
          for col_idx in range(4)], [])
 
-    melodies = [group for (group, msg) in groups
-                if is_group_melody(group,
-                                   args.min_length,
-                                   args.min_unique,
-                                   args.max_repeat)]
+    melodies = [melody for (melody, msg) in melodies
+                if is_melody(melody,
+                             args.min_length,
+                             args.min_unique,
+                             args.max_repeat)]
+
+    if args.transpose:
+        melodies = [move_to_c(melody) for melody in melodies]
 
     melodies = [remove_ending_silence(melody)
                 for melody in filter_duplicate_melodies(melodies)]
@@ -196,7 +228,6 @@ def main():
         print(fmt % args.input_module.name)
         exit(1)
 
-
     cells = sum(melodies, [])
     rows = [[c, ZERO_CELL, ZERO_CELL, ZERO_CELL] for c in cells]
 
@@ -207,12 +238,12 @@ def main():
 
     mod_out = dict(title = mod.title,
                    sample_headers = mod.sample_headers,
-                   n_played_patterns = n_patterns,
+                   n_orders = n_patterns,
+                   restart_pos = 0,
                    pattern_table = bytearray(pattern_table),
                    patterns = patterns,
                    samples = mod.samples)
-    with args.output_module as outf:
-        outf.write(Module.build(mod_out))
+    save_file(args.output_module.name, mod_out)
 
 if __name__ == '__main__':
     main()

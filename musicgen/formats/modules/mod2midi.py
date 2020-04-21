@@ -4,7 +4,7 @@ from itertools import groupby
 from json import load
 from mido import Message, MidiFile, MidiTrack
 from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import Module
+from musicgen.formats.modules.parser import load_file
 
 # Default midi index for the note C-1.
 MIDI_C1_IDX = 24
@@ -86,19 +86,13 @@ def main():
     parser.add_argument('module', type = FileType('rb'))
     parser.add_argument('midi', type = FileType('wb'))
     args = parser.parse_args()
+    args.module.close()
     args.midi.close()
 
-    with args.module as inf:
-        mod = Module.parse(inf.read())
+    mod = load_file(args.module.name)
 
-    if not args.json:
-        conv_info = {
-            idx : [1, MIDI_C1_IDX, 4, 1.0] for idx in range(1, 32)
-        }
-    else:
-        conv_info = load(args.json)
-        # convert to integer keys
-        conv_info = {int(k) : v for (k, v) in conv_info.items()}
+    conv_info = load(args.json)
+    conv_info = {int(k) : v for (k, v) in conv_info.items()}
 
     rows = linearize_rows(mod)
     print(rows_to_string(rows))
