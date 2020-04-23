@@ -6,7 +6,7 @@ from musicgen.formats.modules import *
 from musicgen.formats.modules.parser import load_file, save_file
 from sys import exit
 
-def group_completion(buf,
+def group_completion(buf, cell,
                      last_sample, sample,
                      last_timing, timing,
                      row_delta,
@@ -19,6 +19,13 @@ def group_completion(buf,
 
     if row_delta > max_distance:
         return True, 'notes_apart'
+
+    notes = [period_to_idx(c.period) for c in buf if c.sample_idx != 0]
+    notes.append(period_to_idx(cell.period))
+    hi_octave = max(notes) // 12
+    lo_octave = min(notes) // 12
+    if hi_octave - lo_octave >= 2:
+        return True, 'two_octaves'
 
     # Rows containing notes
     rows = [i for i, cell in enumerate(buf) if cell.sample_idx != 0]
@@ -50,6 +57,14 @@ def build_cell(sample, note, effect_cmd, effect_arg):
                 effect_arg1 = effect_arg1,
                 effect_arg2 = effect_arg2)
 
+def is_silence(cell):
+    return (cell.effect_cmd == 0xc
+            and cell.effect_arg1 == 0
+            and cell.effect_arg2 == 0)
+
+# def is_note(cell):
+#     return cell.sample_idx != 0 and not is_silence(cell)
+
 def extract_sample_groups(rows, col_idx,
                           max_distance, mu_factor, mu_threshold):
     # Tempo and speed
@@ -58,22 +73,32 @@ def extract_sample_groups(rows, col_idx,
     last_sample = None
     last_sample_row = None
     buf = []
-
+    current_period = None
     for row_idx, row in enumerate(rows):
         timing = update_timings(row, *timing)
         cell = row[col_idx]
         sample = cell.sample_idx
-        if last_sample is None:
-            last_sample = sample
-        if last_sample_row is None:
-            last_sample_row = row_idx
-        if last_timing is None:
-            last_timing = timing
 
         if sample != 0:
+            if last_sample is None:
+                last_sample = sample
+            if last_sample_row is None:
+                last_sample_row = row_idx
+            if last_timing is None:
+                last_timing = timing
+
+            # What a hack.
+            if current_period is None:
+                current_period = cell.period
+                if current_period == 0:
+                    current_period = PERIODS[BASE_NOTE_IDX]
+            if cell.period:
+                current_period = cell.period
+            cell.period = current_period
+
             row_delta = row_idx - last_sample_row
             status, msg = group_completion(
-                buf,
+                buf, cell,
                 last_sample, sample,
                 last_timing, timing,
                 row_delta,
@@ -82,6 +107,7 @@ def extract_sample_groups(rows, col_idx,
                 # Emit timing info.
                 speed = last_timing[1]
                 timing_cell = Container(build_cell(0, -1, 0xf, speed))
+                assert buf[0].sample_idx != 0
                 yield [timing_cell] + buf, msg
                 buf = []
             last_sample = sample
@@ -93,7 +119,8 @@ def extract_sample_groups(rows, col_idx,
             cell.effect_cmd = 0
             cell.effect_arg1 = 0
             cell.effect_arg2 = 0
-        buf.append(cell)
+        if sample != 0 or buf:
+            buf.append(cell)
     yield buf, 'last_one'
 
 def is_melody(cells, min_length, min_notes, max_repeat):
@@ -218,7 +245,7 @@ def main():
     melodies = [remove_ending_silence(melody)
                 for melody in filter_duplicate_melodies(melodies)]
     if args.info:
-        print('=== MELODIES ===')
+        print(f'=== {len(melodies)} MELODIES ===')
         for melody in melodies:
             print('\n'.join(cell_to_string(c) for c in melody))
             print()
