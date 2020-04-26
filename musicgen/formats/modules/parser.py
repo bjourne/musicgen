@@ -25,13 +25,18 @@ Pattern = Struct(
     'rows' / Array(64, Array(4, Cell))
     )
 
+# If the declared size is less than 2 it is an empty sample. This
+# logic comes from libmodplug.
+def empty_sample(header):
+    return header.size < 2
+
 def sample_length(x):
-    size = x._.sample_headers[x._index].size * 2
-    return size - 2 if size else 0
+    header = x._.sample_headers[x._index]
+    return header.size - 2 if not empty_sample(header) else 0
 
 def padding_length(x):
-    size = x._.sample_headers[x._index].size
-    return 2 if size else 0
+    header = x._.sample_headers[x._index]
+    return 2 if not empty_sample(header) else 0
 
 SampleData = Struct(
     Padding(padding_length),
@@ -63,6 +68,12 @@ ModuleSTK = Struct(
 def load_file(fname):
     with open(fname, 'rb') as f:
         arr = bytearray(f.read())
+
+    # The magic at offset 1080 determines type of module. If the magic
+    # is not a printable ascii string, the module is a Sound Tracker
+    # module containing only 15 samples. Otherwise, if the magic is
+    # the string "M.K." it is a ProTracker module containing 31
+    # samples.
     magic = arr[1080:1084].decode('utf-8')
     if not magic.isprintable():
         print(f'{fname} is an STK. file')

@@ -9,6 +9,7 @@ Music generation using neural networks
 * https://soundprogramming.net/file-formats/general-midi-instrument-list/
 * https://soundprogramming.net/file-formats/general-midi-level-2-instrument-list/
 * https://soundprogramming.net/file-formats/general-midi-drum-note-numbers/
+* https://github.com/Konstanty/libmodplug/blob/master/src/load_mod.cpp
 
 # Todo
 

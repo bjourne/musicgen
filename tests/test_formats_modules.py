@@ -24,3 +24,8 @@ def test_pattern_jump():
 def test_load_stk_module():
     mod = load_file(TEST_PATH / '3ddance.mod')
     assert mod.n_orders == 28
+
+def test_protracker_15_sample_module():
+    mod = load_file(TEST_PATH / 'am-fm_-_0ldsk00l_w1z4rd.mod')
+    for i in range(15, 31):
+        assert len(mod.samples[i].bytes) == 0
