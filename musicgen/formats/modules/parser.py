@@ -31,8 +31,9 @@ def empty_sample(header):
     return header.size < 2
 
 def sample_length(x):
+    '''Length of the sample in bytes.'''
     header = x._.sample_headers[x._index]
-    return header.size - 2 if not empty_sample(header) else 0
+    return header.size * 2 - 2 if not empty_sample(header) else 0
 
 def padding_length(x):
     header = x._.sample_headers[x._index]

@@ -78,12 +78,16 @@ def main():
         fine_tune = header.fine_tune
         sample = samples[sample_idx]
 
+        length = header.size * 2
+        repeat_from = header.repeat_from
+        repeat_len = 0 if header.repeat_len < 2 else header.repeat_len
+
         print(f'*** Sample "{name}" (#{sample_idx + 1}) ***')
         print(f'Volume     : {volume}')
         print(f'Fine tune  : {fine_tune}')
-        print(f'Length     : {len(sample.arr)}')
-        print(f'Repeat from: {sample.repeat_from}')
-        print(f'Repeat len : {sample.repeat_len}')
+        print(f'Length     : {length}')
+        print(f'Repeat from: {repeat_from}')
+        print(f'Repeat len : {repeat_len}')
 
         play_sample_at_freq(sample, freq, volume)
         sleep(0.5)

@@ -31,17 +31,21 @@ def test_protracker_15_sample_module():
     for i in range(15, 31):
         assert len(mod.samples[i].bytes) == 0
 
+def percussive_samples(mod):
+    rows = linearize_rows(mod)
+    notes = list(notes_in_rows(mod, rows))
+    return {sample for (sample, p) in sample_props(mod, notes)
+            if p.is_percussive}
+
+def test_sample_length():
+    mod = load_file(TEST_PATH / 'his_hirsute_ant.mod')
+    assert len(mod.samples[0].bytes) + 2 == 0x23ca
+
 def test_analyze():
     mod = load_file(TEST_PATH / 'androidr.mod')
-    rows = linearize_rows(mod)
-    notes = notes_in_rows(mod, rows)
-    samples = {sample for (sample, p) in sample_props(notes)
-               if p.is_percussive}
-    assert samples == {2, 3, 4}
+    assert percussive_samples(mod) == {2, 3, 4}
 
     mod = load_file(TEST_PATH / 'big_blunts.mod')
-    rows = linearize_rows(mod)
-    notes = notes_in_rows(mod, rows)
-    samples = {sample for (sample, p) in sample_props(notes)
-               if p.is_percussive}
-    assert samples == {17, 21}
+    assert percussive_samples(mod) == {17, 21}
+
+    #mod = load_file(TEST_PATH / 'his_hirsute_ant.mod')

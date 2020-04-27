@@ -1,41 +1,117 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-from collections import Counter, namedtuple
+from collections import Counter, defaultdict, namedtuple
 from itertools import groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.parser import load_file
 
+HEADER = [
+    'Sample',
+    'Common freq',
+    'N. Notes', 'N. Uniq',
+    'Longest rep',
+    'Size',
+    'Note dur',
+    'Repeat pct',
+    'Percussive?'
+]
+ROW_FORMAT = ['%2d',
+              '%.2f',
+              '%3d', '%2d',
+              '%3d', '%5d', '%2d',
+              '%.2f',
+              '%s']
+
 SampleProps = namedtuple('SampleProps', [
     'most_common_freq',
+    'n_notes',
     'n_unique_notes',
     'len_longest_repeating_seq',
+    'size',
+    'note_duration',
+    'repeat_pct',
     'is_percussive'])
 
-def get_sample_props(notes):
+def relative_counter(seq):
+    counter = Counter(seq)
+    tot = len(seq)
+    return {el : freq / tot for el, freq in counter.items()}
+
+def bin_distance(dist):
+    if dist >= 16:
+        return 16
+    elif dist >= 8:
+        return 8
+    elif dist >= 4:
+        return 4
+    elif dist >= 3:
+        return 3
+    elif dist >= 2:
+        return 2
+    return 1
+
+def get_sample_props(header, notes, distances):
+    assert len(distances) == len(notes)
+
     # Get all piches
     pitches = [n.note_idx for n in notes]
 
-    # Compute the length of the longest sequence of repeating pitches.
-    groups = groupby(pitches)
-    longest_rep = max(len(list(group)) for (p, group) in groups)
+    # Homogenize distances
+    distances = [bin_distance(d) for d in distances]
+    counter = relative_counter(distances)
+    distances = [d for (d, freq) in counter.items() if freq >= 0.05]
+    duration = max(distances)
 
-    counter = Counter(pitches)
-    sample, freq = counter.most_common(1)[0]
-    common_rel_freq = freq / len(pitches)
+    # Compute header size and repeat pct
+    size = header.size * 2
+    if header.repeat_len > 2:
+        repeat_pct = header.repeat_from / header.size
+    else:
+        repeat_pct = 1.0
+
+    # Compute the length of the longest sequence of repeating pitches.
+    longest_rep = max(len(list(group))
+                      for (p, group) in groupby(pitches))
+
+    counter = relative_counter(pitches)
+    most_common_freq = max(counter.values())
     n_unique = len(counter)
 
-    is_percussive = ((common_rel_freq > 0.9 and n_unique <= 2)
-                     or (common_rel_freq > 0.8 and longest_rep >= 50))
+    # Guess whether the sample is for a percussive instrument.
+    is_percussive = False
+    if repeat_pct == 1.0:
+        if most_common_freq > 0.9 and n_unique <= 2:
+            is_percussive = True
+        if most_common_freq > 0.8 and longest_rep >= 50:
+            is_percussive = True
 
-    return SampleProps(common_rel_freq,
+    return SampleProps(most_common_freq,
+                       len(notes),
                        n_unique,
                        longest_rep,
+                       size,
+                       duration,
+                       repeat_pct,
                        is_percussive)
 
-def sample_props(notes):
+def sample_props(mod, notes):
+    # Note distances
+    distances = defaultdict(list)
+    for col_idx, group in sort_groupby(notes, lambda n: n.col_idx):
+        last_row = None
+        for note in group:
+            if last_row is None:
+                delta = 0
+            else:
+                delta = note.row_idx - last_row
+            assert delta >= 0
+            distances[note.sample_idx].append(delta)
+            last_row = note.row_idx
+
     # Group by sample
-    notes = sorted(notes, key = lambda n: n.sample_idx)
-    grouped = groupby(notes, key = lambda n: n.sample_idx)
-    grouped = [(sample, get_sample_props(group))
+    grouped = sort_groupby(notes, lambda n: n.sample_idx)
+    grouped = [(sample, get_sample_props(
+        mod.sample_headers[sample - 1],
+        list(group), distances[sample]))
                for sample, group in grouped]
     return grouped
 
@@ -52,22 +128,18 @@ def main():
 
     mod = load_file(args.module.name)
     rows = linearize_rows(mod)
-    notes = notes_in_rows(mod, rows)
-    props = sample_props(notes)
+    notes = list(notes_in_rows(mod, rows))
+    props = sample_props(mod, notes)
 
     # Make a table
-    rows = [[sample,
-             '%.3f' % p.most_common_freq,
-             p.n_unique_notes,
-             p.len_longest_repeating_seq,
-             p.is_percussive]
-            for (sample, p) in props]
-    header = ['Sample', 'Common freq.', '#Uniq', 'Len rep.', 'Percussive?']
+    rows = [(sample,) + p for (sample, p) in props]
+    rows = [[fmt % col for (col, fmt) in zip(row, ROW_FORMAT)]
+            for row in rows]
     tt_print(rows,
              padding = (0, 0, 0, 0),
-             alignment = 'rrrrc',
+             alignment = 'rrrrrrrrc',
              style = ascii_booktabs,
-             header = header)
+             header = HEADER)
 
 if __name__ == '__main__':
     main()

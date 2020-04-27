@@ -1,5 +1,6 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from collections import namedtuple
+from itertools import groupby
 import numpy as np
 
 PERIODS = [
@@ -158,7 +159,7 @@ def notes_in_rows(mod, rows):
         for col_idx, cell in enumerate(row):
             if not cell.sample_idx:
                 continue
-            # Might not be a period supplied.
+            # Period may be missing.
             period = cell.period
             if not period:
                 period = channel_periods[col_idx]
@@ -225,3 +226,9 @@ def repeat_sample(sample, arr, dur_s):
             repeated_body = np.tile(body, n_repeats)
             arr = np.concatenate((head, repeated_body, tail))
     return arr
+
+########################################################################
+# Utility
+########################################################################
+def sort_groupby(seq, keyfun):
+    return groupby(sorted(seq, key = keyfun), keyfun)

@@ -76,13 +76,14 @@ def midi_notes_to_track(channel, notes):
                           channel = channel)
         prev = ofs
 
-def generate_conv_info(notes):
-    props = sample_props(notes)
-    print(props)
-    lookup = {True : [-1, 35, 4, 1.0],
-              False : [1, 36, 4, 1.0]}
-    return {sample : lookup[p.is_percussive]
-            for (sample, p) in props}
+def sample_props_to_conv(props):
+    if props.is_percussive:
+        return [-1, 31, 4, 1.0]
+    return [1, 36, props.note_duration, 1.0]
+
+def generate_conv_info(mod, notes):
+    props = sample_props(mod, notes)
+    return {sample : sample_props_to_conv(p) for (sample, p) in props}
 
 def main():
     parser = ArgumentParser(description='Module stripper')
@@ -108,13 +109,13 @@ def main():
 
     # Extract mod notes and sort/groupby channel
     notes = list(notes_in_rows(mod, rows))
-    notes = sorted(notes, key = lambda x: x[0])
-    notes_per_channel = groupby(notes, key = lambda x: x[0])
+
+    notes_per_channel = sort_groupby(notes, lambda n: n.col_idx)
     notes_per_channel = [list(grp) for (_, grp) in notes_per_channel]
 
     # Load or generate conversion
     if args.auto:
-        conv_info = generate_conv_info(notes)
+        conv_info = generate_conv_info(mod, notes)
     else:
         conv_info = load(args.json)
         conv_info = {int(k) : v for (k, v) in conv_info.items()}
