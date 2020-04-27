@@ -1,16 +1,12 @@
+# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from argparse import ArgumentParser, FileType
 from collections import defaultdict
 from itertools import groupby
 from json import load
 from mido import Message, MidiFile, MidiTrack
 from musicgen.formats.modules import *
+from musicgen.formats.modules.analyze import classify_samples
 from musicgen.formats.modules.parser import load_file
-
-# Default midi index for the note C-1.
-MIDI_C1_IDX = 24
-
-# Default convert to MIDI instrument 1, with a C-1 note base.
-DEFAULT_CONV = (1, MIDI_C1_IDX, 4, 1.0)
 
 def note_duration(notes, i, row_idx, note_dur):
     if i < len(notes) - 1:
@@ -80,28 +76,48 @@ def midi_notes_to_track(channel, notes):
                           channel = channel)
         prev = ofs
 
+def generate_conv_info(notes):
+    props = classify_samples(notes)
+    print(props)
+    lookup = {True : [-1, 31, 4, 1.0],
+              False : [1, 48, 4, 1.0]}
+    return {sample : lookup[is_percussive]
+            for (sample, is_percussive) in props}
+
 def main():
     parser = ArgumentParser(description='Module stripper')
-    parser.add_argument('--json', type = FileType('r'))
+
     parser.add_argument('module', type = FileType('rb'))
     parser.add_argument('midi', type = FileType('wb'))
+
+    group = parser.add_mutually_exclusive_group(required = True)
+    group.add_argument(
+        '--json', type = FileType('r'),
+        help = 'JSON configuration to guide the conversion')
+    group.add_argument(
+        '--auto', action = 'store_true',
+        help = 'Automatic instrument mapping')
+
     args = parser.parse_args()
     args.module.close()
     args.midi.close()
 
     mod = load_file(args.module.name)
-
-    conv_info = load(args.json)
-    conv_info = {int(k) : v for (k, v) in conv_info.items()}
-
     rows = linearize_rows(mod)
     print(rows_to_string(rows))
 
     # Extract mod notes and sort/groupby channel
-    notes = notes_in_rows(mod, rows)
+    notes = list(notes_in_rows(mod, rows))
     notes = sorted(notes, key = lambda x: x[0])
     notes_per_channel = groupby(notes, key = lambda x: x[0])
     notes_per_channel = [list(grp) for (_, grp) in notes_per_channel]
+
+    # Load or generate conversion
+    if args.auto:
+        conv_info = generate_conv_info(notes)
+    else:
+        conv_info = load(args.json)
+        conv_info = {int(k) : v for (k, v) in conv_info.items()}
 
     # Convert to midi notes
     notes_per_channel = [list(midi_notes(conv_info, notes))

@@ -1,4 +1,5 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+from collections import namedtuple
 import numpy as np
 
 PERIODS = [
@@ -141,6 +142,9 @@ def mod_note_volume(mod, cell):
         return (cell.effect_arg1 << 4) + cell.effect_arg2
     return mod.sample_headers[cell.sample_idx - 1].volume
 
+Note = namedtuple('Note', ['col_idx', 'row_idx',
+                           'sample_idx', 'note_idx',
+                           'vol', 'time_ms'])
 def notes_in_rows(mod, rows):
     '''
     Order is (col, row, sample, note, vol, ms)
@@ -162,7 +166,9 @@ def notes_in_rows(mod, rows):
             note_idx = period_to_idx(period)
             vol = mod_note_volume(mod, cell)
             sample_idx = cell.sample_idx
-            yield (col_idx, row_idx, sample_idx, note_idx, vol, time_ms)
+            yield Note(col_idx, row_idx,
+                       sample_idx, note_idx,
+                       vol, time_ms)
 
 ########################################################################
 # Sample management

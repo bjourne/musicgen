@@ -1,4 +1,5 @@
 from musicgen.formats.modules import *
+from musicgen.formats.modules.analyze import classify_samples
 from musicgen.formats.modules.parser import load_file
 from pathlib import Path
 
@@ -29,3 +30,12 @@ def test_protracker_15_sample_module():
     mod = load_file(TEST_PATH / 'am-fm_-_0ldsk00l_w1z4rd.mod')
     for i in range(15, 31):
         assert len(mod.samples[i].bytes) == 0
+
+def test_analyze():
+    mod = load_file(TEST_PATH / 'androidr.mod')
+    rows = linearize_rows(mod)
+    notes = notes_in_rows(mod, rows)
+    classes = classify_samples(notes)
+    assert classes == [
+        (1, False), (2, True), (3, True), (4, True),
+        (5, False), (6, False), (7, False), (10, False)]
