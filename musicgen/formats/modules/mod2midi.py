@@ -5,7 +5,7 @@ from itertools import groupby
 from json import load
 from mido import Message, MidiFile, MidiTrack
 from musicgen.formats.modules import *
-from musicgen.formats.modules.analyze import classify_samples
+from musicgen.formats.modules.analyze import sample_props
 from musicgen.formats.modules.parser import load_file
 
 def note_duration(notes, i, row_idx, note_dur):
@@ -77,12 +77,12 @@ def midi_notes_to_track(channel, notes):
         prev = ofs
 
 def generate_conv_info(notes):
-    props = classify_samples(notes)
+    props = sample_props(notes)
     print(props)
-    lookup = {True : [-1, 31, 4, 1.0],
-              False : [1, 48, 4, 1.0]}
-    return {sample : lookup[is_percussive]
-            for (sample, is_percussive) in props}
+    lookup = {True : [-1, 35, 4, 1.0],
+              False : [1, 36, 4, 1.0]}
+    return {sample : lookup[p.is_percussive]
+            for (sample, p) in props}
 
 def main():
     parser = ArgumentParser(description='Module stripper')

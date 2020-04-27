@@ -4,14 +4,32 @@ from itertools import groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.parser import load_file
 
-SampleProps = namedtuple('SampleProps',
-                         ['most_common_freq', 'n_unique_notes'])
+SampleProps = namedtuple('SampleProps', [
+    'most_common_freq',
+    'n_unique_notes',
+    'len_longest_repeating_seq',
+    'is_percussive'])
 
 def get_sample_props(notes):
-    notes = [n.note_idx for n in notes]
-    counter = Counter(notes)
+    # Get all piches
+    pitches = [n.note_idx for n in notes]
+
+    # Compute the length of the longest sequence of repeating pitches.
+    groups = groupby(pitches)
+    longest_rep = max(len(list(group)) for (p, group) in groups)
+
+    counter = Counter(pitches)
     sample, freq = counter.most_common(1)[0]
-    return SampleProps(freq / len(notes), len(counter))
+    common_rel_freq = freq / len(pitches)
+    n_unique = len(counter)
+
+    is_percussive = ((common_rel_freq > 0.9 and n_unique <= 2)
+                     or (common_rel_freq > 0.8 and longest_rep >= 50))
+
+    return SampleProps(common_rel_freq,
+                       n_unique,
+                       longest_rep,
+                       is_percussive)
 
 def sample_props(notes):
     # Group by sample
@@ -20,13 +38,6 @@ def sample_props(notes):
     grouped = [(sample, get_sample_props(group))
                for sample, group in grouped]
     return grouped
-
-def is_percussive(props):
-    return props.most_common_freq > 0.9 and props.n_unique_notes <= 2
-
-def classify_samples(notes):
-    props = sample_props(notes)
-    return [(sample, is_percussive(p)) for sample, p in props]
 
 def main():
     from argparse import ArgumentParser, FileType
@@ -45,12 +56,16 @@ def main():
     props = sample_props(notes)
 
     # Make a table
-    rows = [[sample, '%.3f' % p.common_freq, p.n_unique_notes]
+    rows = [[sample,
+             '%.3f' % p.most_common_freq,
+             p.n_unique_notes,
+             p.len_longest_repeating_seq,
+             p.is_percussive]
             for (sample, p) in props]
-    header = ['Sample', 'Common freq', '# Unique']
+    header = ['Sample', 'Common freq.', '#Uniq', 'Len rep.', 'Percussive?']
     tt_print(rows,
              padding = (0, 0, 0, 0),
-             alignment = 'rrr',
+             alignment = 'rrrrc',
              style = ascii_booktabs,
              header = header)
 

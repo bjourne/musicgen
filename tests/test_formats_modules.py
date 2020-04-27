@@ -1,5 +1,5 @@
 from musicgen.formats.modules import *
-from musicgen.formats.modules.analyze import classify_samples
+from musicgen.formats.modules.analyze import sample_props
 from musicgen.formats.modules.parser import load_file
 from pathlib import Path
 
@@ -35,7 +35,13 @@ def test_analyze():
     mod = load_file(TEST_PATH / 'androidr.mod')
     rows = linearize_rows(mod)
     notes = notes_in_rows(mod, rows)
-    classes = classify_samples(notes)
-    assert classes == [
-        (1, False), (2, True), (3, True), (4, True),
-        (5, False), (6, False), (7, False), (10, False)]
+    samples = {sample for (sample, p) in sample_props(notes)
+               if p.is_percussive}
+    assert samples == {2, 3, 4}
+
+    mod = load_file(TEST_PATH / 'big_blunts.mod')
+    rows = linearize_rows(mod)
+    notes = notes_in_rows(mod, rows)
+    samples = {sample for (sample, p) in sample_props(notes)
+               if p.is_percussive}
+    assert samples == {17, 21}
