@@ -4,6 +4,7 @@ from collections import defaultdict
 from itertools import groupby
 from json import load
 from mido import Message, MidiFile, MidiTrack
+from musicgen.utils import sort_groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.analyze import sample_props
 from musicgen.formats.modules.parser import load_file
@@ -83,7 +84,9 @@ def sample_props_to_conv(props):
 
 def generate_conv_info(mod, notes):
     props = sample_props(mod, notes)
-    return {sample : sample_props_to_conv(p) for (sample, p) in props}
+    return {
+        sample : sample_props_to_conv(p)
+        for (sample, p) in props}
 
 def main():
     parser = ArgumentParser(description='Module stripper')

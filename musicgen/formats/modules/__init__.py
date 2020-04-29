@@ -65,6 +65,14 @@ FREQS = [freq_for_index(idx) for idx in range(len(PERIODS))]
 BASE_NOTE_IDX = notestr_to_index('C-3')
 BASE_FREQ = freq_for_index(BASE_NOTE_IDX)
 
+# Enum for effect commands. Python's builtin Enum class doesn't play
+# well with Construct, hence why they are constants.
+EFFECT_CMD_JUMP_TO_OFFSET = 11
+EFFECT_CMD_SET_VOLUME     = 12
+EFFECT_CMD_JUMP_TO_ROW    = 13
+EFFECT_CMD_FINETUNING     = 14
+EFFECT_CMD_UPDATE_TIMING  = 15
+
 def period_to_string(period):
     if period == 0:
         return '---'

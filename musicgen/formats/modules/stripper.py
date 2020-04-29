@@ -10,16 +10,19 @@ def zero_effect(cell):
     cell.effect_arg2 = 0
 
 def strip_cell(cell, channel_idx, sample_indices, channel_indices):
-    if ((cell.sample_idx not in sample_indices)
-        or channel_idx not in channel_indices):
+    channel_is_filtered = channel_idx not in channel_indices
+    if cell.sample_idx not in sample_indices or channel_is_filtered:
         cell.sample_hi = 0
         cell.sample_lo = 0
         cell.sample_idx = 0
         cell.period = 0
 
-    if cell.effect_cmd not in (11, 12, 13, 15):
-        zero_effect(cell)
-    if cell.sample_idx == 0 and cell.effect_cmd == 12:
+    midi_compatible_commands = (EFFECT_CMD_JUMP_TO_OFFSET,
+                                EFFECT_CMD_SET_VOLUME,
+                                EFFECT_CMD_JUMP_TO_ROW,
+                                EFFECT_CMD_UPDATE_TIMING)
+    if (cell.effect_cmd not in midi_compatible_commands or
+        cell.effect_cmd == EFFECT_CMD_SET_VOLUME and channel_is_filtered):
         zero_effect(cell)
 
 def update_pattern_table(mod, pattern_indices):
