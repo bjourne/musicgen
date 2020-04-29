@@ -1,6 +1,7 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from collections import Counter, defaultdict, namedtuple
 from itertools import groupby
+from musicgen.utils import sort_groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.parser import load_file
 
@@ -12,12 +13,14 @@ HEADER = [
     'Size',
     'Note dur',
     'Repeat pct',
+    'Max ringout',
     'Percussive?'
 ]
 ROW_FORMAT = ['%2d',
               '%.2f',
               '%3d', '%2d',
               '%3d', '%5d', '%2d',
+              '%.2f',
               '%.2f',
               '%s']
 
@@ -29,6 +32,7 @@ SampleProps = namedtuple('SampleProps', [
     'size',
     'note_duration',
     'repeat_pct',
+    'max_ringout',
     'is_percussive'])
 
 def relative_counter(seq):
@@ -36,7 +40,7 @@ def relative_counter(seq):
     tot = len(seq)
     return {el : freq / tot for el, freq in counter.items()}
 
-def bin_distance(dist):
+def bin_duration(dist):
     if dist >= 16:
         return 16
     elif dist >= 8:
@@ -49,19 +53,18 @@ def bin_distance(dist):
         return 2
     return 1
 
-def get_sample_props(header, notes, distances):
-    assert len(distances) == len(notes)
-
+def get_sample_props(mod, sample, notes):
     # Get all piches
-    pitches = [n.note_idx for n in notes]
+    pitches = [n.pitch_idx for n in notes]
 
-    # Homogenize distances
-    distances = [bin_distance(d) for d in distances]
-    counter = relative_counter(distances)
-    distances = [d for (d, freq) in counter.items() if freq >= 0.05]
-    duration = max(distances)
+    # Homogenize durations
+    durations = [bin_duration(n.row_duration) for n in notes]
+    counter = relative_counter(durations)
+    durations = [d for (d, freq) in counter.items() if freq >= 0.05]
+    base_duration = max(durations)
 
     # Compute header size and repeat pct
+    header = mod.sample_headers[sample - 1]
     size = header.size * 2
     if header.repeat_len > 2:
         repeat_pct = header.repeat_from / header.size
@@ -76,11 +79,17 @@ def get_sample_props(header, notes, distances):
     most_common_freq = max(counter.values())
     n_unique = len(counter)
 
+    # Compute average ringout
+    max_ringout = max(n.ringout_duration for n in notes)
+
     # Guess whether the sample is for a percussive instrument.
     is_percussive = False
+    if n_unique <= 2 and max_ringout <= 0.15:
+        is_percussive = True
     if repeat_pct == 1.0:
         if most_common_freq > 0.9 and n_unique <= 2:
-            is_percussive = True
+            if max_ringout < 0.6:
+                is_percussive = True
         if most_common_freq > 0.8 and longest_rep >= 50:
             is_percussive = True
 
@@ -89,30 +98,40 @@ def get_sample_props(header, notes, distances):
                        n_unique,
                        longest_rep,
                        size,
-                       duration,
+                       base_duration,
                        repeat_pct,
+                       max_ringout,
                        is_percussive)
 
-def sample_props(mod, notes):
-    # Note distances
-    distances = defaultdict(list)
+AnalyzeNote = namedtuple('AnalyzeNote', [
+    'sample_idx', 'pitch_idx', 'row_duration', 'ringout_duration'])
+
+def notes_to_analyze_notes(samples, notes):
     for col_idx, group in sort_groupby(notes, lambda n: n.col_idx):
         last_row = None
-        for note in group:
+        for n in group:
+            assert 0 <= n.note_idx < 60
             if last_row is None:
-                delta = 0
+                row_duration = 0
             else:
-                delta = note.row_idx - last_row
-            assert delta >= 0
-            distances[note.sample_idx].append(delta)
-            last_row = note.row_idx
+                row_duration = n.row_idx - last_row
+            assert row_duration >= 0
 
-    # Group by sample
-    grouped = sort_groupby(notes, lambda n: n.sample_idx)
-    grouped = [(sample, get_sample_props(
-        mod.sample_headers[sample - 1],
-        list(group), distances[sample]))
-               for sample, group in grouped]
+            # Compute ringout duration
+            freq = FREQS[n.note_idx]
+
+            n_orig = len(samples[n.sample_idx - 1].bytes)
+            ringout_s = n_orig * BASE_FREQ / (freq * AMIGA_SAMPLE_RATE)
+            yield AnalyzeNote(n.sample_idx, n.note_idx,
+                              row_duration, ringout_s)
+            last_row = n.row_idx
+
+def sample_props(mod, notes):
+
+    analyze_notes = notes_to_analyze_notes(mod.samples, notes)
+    grouped = sort_groupby(analyze_notes, lambda n: n.sample_idx)
+    grouped = [(sample, get_sample_props(mod, sample, list(group)))
+               for (sample, group) in grouped]
     return grouped
 
 def main():
@@ -137,7 +156,7 @@ def main():
             for row in rows]
     tt_print(rows,
              padding = (0, 0, 0, 0),
-             alignment = 'rrrrrrrrc',
+             alignment = 'rrrrrrrrrc',
              style = ascii_booktabs,
              header = HEADER)
 

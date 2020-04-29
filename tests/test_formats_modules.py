@@ -48,4 +48,5 @@ def test_analyze():
     mod = load_file(TEST_PATH / 'big_blunts.mod')
     assert percussive_samples(mod) == {17, 21}
 
-    #mod = load_file(TEST_PATH / 'his_hirsute_ant.mod')
+    mod = load_file(TEST_PATH / 'boner.mod')
+    assert percussive_samples(mod) == {1, 2, 3, 6}

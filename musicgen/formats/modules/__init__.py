@@ -1,6 +1,6 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+from bisect import bisect_left
 from collections import namedtuple
-from itertools import groupby
 import numpy as np
 
 PERIODS = [
@@ -15,10 +15,13 @@ PERIOD_TO_IDX = {p : i for i, p in enumerate(PERIODS)}
 def period_to_idx(period):
     # This is a little hacky. Some cells have incorrect period values.
     idx = PERIOD_TO_IDX.get(period)
+
     if idx is None:
-        idx = PERIOD_TO_IDX.get(period - 1)
-        if idx is None:
-            idx = PERIOD_TO_IDX.get(period + 1)
+        rev_periods = list(reversed(PERIODS))
+        idx = bisect_left(rev_periods, period)
+        assert idx != len(PERIODS)
+        idx = 59 - idx
+        print('request %d found %d' % (period, PERIODS[idx]))
     assert idx is not None
     return idx
 
@@ -164,7 +167,9 @@ def notes_in_rows(mod, rows):
             if not period:
                 period = channel_periods[col_idx]
             channel_periods[col_idx] = period
+
             note_idx = period_to_idx(period)
+            assert 0 <= note_idx < 60
             vol = mod_note_volume(mod, cell)
             sample_idx = cell.sample_idx
             yield Note(col_idx, row_idx,
@@ -226,9 +231,3 @@ def repeat_sample(sample, arr, dur_s):
             repeated_body = np.tile(body, n_repeats)
             arr = np.concatenate((head, repeated_body, tail))
     return arr
-
-########################################################################
-# Utility
-########################################################################
-def sort_groupby(seq, keyfun):
-    return groupby(sorted(seq, key = keyfun), keyfun)
