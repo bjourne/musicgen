@@ -15,3 +15,4 @@ Music generation using neural networks
 
 * Heuristics.
 * Support for chords.
+* Handle slides implemented using multiple samples better (agnostic.mod).

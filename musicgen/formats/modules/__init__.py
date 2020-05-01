@@ -1,5 +1,5 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from collections import namedtuple
 import numpy as np
 
@@ -15,13 +15,12 @@ PERIOD_TO_IDX = {p : i for i, p in enumerate(PERIODS)}
 def period_to_idx(period):
     # This is a little hacky. Some cells have incorrect period values.
     idx = PERIOD_TO_IDX.get(period)
-
     if idx is None:
         rev_periods = list(reversed(PERIODS))
-        idx = bisect_left(rev_periods, period)
-        assert idx != len(PERIODS)
-        idx = 59 - idx
-        print('request %d found %d' % (period, PERIODS[idx]))
+        left_idx = bisect_left(rev_periods, period)
+        assert left_idx
+        print('found ', rev_periods[left_idx - 1], 'for', period)
+        idx = 60 - left_idx
     assert idx is not None
     return idx
 
@@ -105,7 +104,7 @@ def calc_row_time(tempo, speed):
 
 def update_timings(row, tempo, speed):
     for cell in row:
-        if cell.effect_cmd == 15:
+        if cell.effect_cmd == EFFECT_CMD_UPDATE_TIMING:
             val = 16 * cell.effect_arg1 + cell.effect_arg2
             if val <= 0x1f:
                 speed = val
@@ -157,6 +156,14 @@ def mod_note_volume(mod, cell):
 Note = namedtuple('Note', ['col_idx', 'row_idx',
                            'sample_idx', 'note_idx',
                            'vol', 'time_ms'])
+
+# If the sample is present but not the period, it is ambiguous whether
+# the cell represents repeating the note or bending a ringing
+# note. For most but not all MODs, the MIDI representation becomes
+# better if such cells are assumed to be bends.
+#
+# Worse : blu_angel_-_dream.mod
+# Better: agnostic.mod
 def notes_in_rows(mod, rows):
     '''
     Order is (col, row, sample, note, vol, ms)
@@ -164,25 +171,39 @@ def notes_in_rows(mod, rows):
     tempo = DEFAULT_TEMPO
     speed = DEFAULT_SPEED
     channel_periods = {}
+    channel_samples = {}
     for row_idx, row in enumerate(rows):
         tempo, speed = update_timings(row, tempo, speed)
         time_ms = int(calc_row_time(tempo, speed) * 1000)
         for col_idx, cell in enumerate(row):
-            if not cell.sample_idx:
-                continue
             # Period may be missing.
+            sample_idx = cell.sample_idx
             period = cell.period
-            if not period:
+            # Neither sample nor note, skipping
+            if not sample_idx and not period:
+                continue
+
+            # Sample but no note
+            if sample_idx and not period:
                 period = channel_periods[col_idx]
-            channel_periods[col_idx] = period
+                fmt = 'Missing period for sample %2d at cell %4d:%d.'
+                print(fmt % (sample_idx, row_idx, col_idx))
+                continue
+
+            # Period but no sample
+            if period and not sample_idx:
+                fmt = 'Using last sample at cell %4d:%d'
+                print(fmt % (row_idx, col_idx))
+                sample_idx = channel_samples[col_idx]
 
             note_idx = period_to_idx(period)
             assert 0 <= note_idx < 60
             vol = mod_note_volume(mod, cell)
-            sample_idx = cell.sample_idx
             yield Note(col_idx, row_idx,
                        sample_idx, note_idx,
                        vol, time_ms)
+            channel_samples[col_idx] = sample_idx
+            channel_periods[col_idx] = period
 
 ########################################################################
 # Sample management

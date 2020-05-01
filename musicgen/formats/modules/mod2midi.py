@@ -4,7 +4,7 @@ from collections import defaultdict
 from itertools import groupby
 from json import load
 from mido import Message, MidiFile, MidiTrack
-from musicgen.utils import sort_groupby
+from musicgen.utils import StructuredPrinter, sort_groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.analyze import sample_props
 from musicgen.formats.modules.parser import load_file
@@ -77,22 +77,33 @@ def midi_notes_to_track(channel, notes):
                           channel = channel)
         prev = ofs
 
+N_PERC = 0
+PERCS = [40, 36, 31]
 def sample_props_to_conv(props):
+    global N_PERC
     if props.is_percussive:
-        return [-1, 31, 4, 1.0]
-    return [1, 36, props.note_duration, 1.0]
+        val = [-1, PERCS[N_PERC], 4, 1.0]
+        N_PERC = (N_PERC + 1) % len(PERCS)
+        return val
+    instr = 1
+    base = 36
+    # if props.note_duration > 2:
+    #     base = 24
+    return [instr, base, props.note_duration, 1.0]
 
 def generate_conv_info(mod, notes):
     props = sample_props(mod, notes)
-    return {
-        sample : sample_props_to_conv(p)
-        for (sample, p) in props}
+    return {sample : sample_props_to_conv(p)
+            for (sample, p) in props}
 
 def main():
     parser = ArgumentParser(description='Module stripper')
 
     parser.add_argument('module', type = FileType('rb'))
     parser.add_argument('midi', type = FileType('wb'))
+    parser.add_argument('--info',
+                        help = 'Print information',
+                        action = 'store_true')
 
     group = parser.add_mutually_exclusive_group(required = True)
     group.add_argument(
@@ -101,14 +112,17 @@ def main():
     group.add_argument(
         '--auto', action = 'store_true',
         help = 'Automatic instrument mapping')
-
     args = parser.parse_args()
     args.module.close()
     args.midi.close()
+    sp = StructuredPrinter(args.info)
 
     mod = load_file(args.module.name)
     rows = linearize_rows(mod)
-    print(rows_to_string(rows))
+    sp.header('LINEARIZED ROWS')
+    for row in rows:
+        sp.print(row_to_string(row))
+    sp.leave()
 
     # Extract mod notes and sort/groupby channel
     notes = list(notes_in_rows(mod, rows))
@@ -122,6 +136,13 @@ def main():
     else:
         conv_info = load(args.json)
         conv_info = {int(k) : v for (k, v) in conv_info.items()}
+
+    sp.header('MIDI MAPPING', '%d samples', len(conv_info))
+    sp.print('sample midi base dur vol')
+    fmt = '%6d %4d %4d %3d %3.1f'
+    for sample_idx, midi_def in conv_info.items():
+        sp.print(fmt, (sample_idx,) + tuple(midi_def))
+    sp.leave()
 
     # Convert to midi notes
     notes_per_channel = [list(midi_notes(conv_info, notes))
