@@ -90,7 +90,9 @@ def get_sample_props(mod, sample, notes):
         if most_common_freq > 0.9 and n_unique <= 2:
             if max_ringout < 0.6:
                 is_percussive = True
-        if most_common_freq > 0.8 and longest_rep >= 50:
+        # If the same note is repeated more than 40 times, it must be
+        # percussive. This is ofc completely arbitrary.
+        if longest_rep >= 40:
             is_percussive = True
 
     return SampleProps(most_common_freq,

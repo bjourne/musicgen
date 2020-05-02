@@ -51,6 +51,9 @@ def test_analyze():
     mod = load_file(TEST_PATH / 'boner.mod')
     assert percussive_samples(mod) == {1, 2, 3, 6}
 
+    mod = load_file(TEST_PATH / 'lambada.mod')
+    assert percussive_samples(mod) == {2, 4, 5, 6}
+
 def test_period_to_idx():
     idx = period_to_idx(679)
     assert PERIODS[idx] == 678
