@@ -61,3 +61,6 @@ def test_analyze():
 def test_period_to_idx():
     idx = period_to_idx(679)
     assert PERIODS[idx] == 678
+
+    idx = period_to_idx(56)
+    assert PERIODS[idx] == 57

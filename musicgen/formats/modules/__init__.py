@@ -17,10 +17,13 @@ def period_to_idx(period):
     idx = PERIOD_TO_IDX.get(period)
     if idx is None:
         rev_periods = list(reversed(PERIODS))
-        left_idx = bisect_left(rev_periods, period)
-        assert left_idx
-        print('found ', rev_periods[left_idx - 1], 'for', period)
-        idx = 60 - left_idx
+        idx = bisect_left(rev_periods, period)
+
+        if idx > 0:
+            print('found ', rev_periods[idx - 1], 'for', period)
+        else:
+            idx = 1
+        idx = 60 - idx
     assert idx is not None
     return idx
 
@@ -185,13 +188,18 @@ def notes_in_rows(mod, rows):
 
             # Sample but no note
             if sample_idx and not period:
-                period = channel_periods[col_idx]
                 fmt = 'Missing period for sample %2d at cell %4d:%d.'
                 print(fmt % (sample_idx, row_idx, col_idx))
                 continue
 
             # Period but no sample
             if period and not sample_idx:
+                sample_idx = channel_samples.get(col_idx)
+                if sample_idx is None:
+                    fmt = 'Missing sample at cell %4d:%d and ' \
+                        + 'no channel sample. MOD bug?'
+                    print(fmt % (row_idx, col_idx))
+                    continue
                 fmt = 'Using last sample at cell %4d:%d'
                 print(fmt % (row_idx, col_idx))
                 sample_idx = channel_samples[col_idx]
