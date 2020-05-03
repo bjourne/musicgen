@@ -41,16 +41,10 @@ def relative_counter(seq):
     return {el : freq / tot for el, freq in counter.items()}
 
 def bin_duration(dist):
-    if dist >= 16:
-        return 16
-    elif dist >= 8:
-        return 8
-    elif dist >= 4:
-        return 4
-    elif dist >= 3:
-        return 3
-    elif dist >= 2:
-        return 2
+    thresholds = [64, 32, 16, 8, 4, 3, 2]
+    for thr in thresholds:
+        if dist >= thr:
+            return thr
     return 1
 
 def get_sample_props(mod, sample, notes):
@@ -93,6 +87,9 @@ def get_sample_props(mod, sample, notes):
         # If the same note is repeated more than 40 times, it must be
         # percussive. This is ofc completely arbitrary.
         if longest_rep >= 40:
+            is_percussive = True
+        # Another arbitrary one.
+        if n_unique == 3 and max_ringout <= 0.11 and longest_rep >= 23:
             is_percussive = True
 
     return SampleProps(most_common_freq,

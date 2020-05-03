@@ -41,6 +41,7 @@ def test_sample_length():
     mod = load_file(TEST_PATH / 'his_hirsute_ant.mod')
     assert len(mod.samples[0].bytes) + 2 == 0x23ca
 
+# Testing heuristics for detecting percussive samples.
 def test_analyze():
     mod = load_file(TEST_PATH / 'androidr.mod')
     assert percussive_samples(mod) == {2, 3, 4}
@@ -53,6 +54,9 @@ def test_analyze():
 
     mod = load_file(TEST_PATH / 'lambada.mod')
     assert percussive_samples(mod) == {2, 4, 5, 6}
+
+    mod = load_file(TEST_PATH / 'mist-eek.mod')
+    assert percussive_samples(mod) == {10, 11, 12}
 
 def test_period_to_idx():
     idx = period_to_idx(679)
