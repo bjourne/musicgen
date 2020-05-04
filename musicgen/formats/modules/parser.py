@@ -25,8 +25,9 @@ Pattern = Struct(
     'rows' / Array(64, Array(4, Cell))
     )
 
-# If the declared size is less than 2 it is an empty sample. This
-# logic comes from libmodplug.
+# If the size is zero the sample is empty. It is also empty if the
+# size is one because that is a trick players use to allow
+# idle-looping. Same logic in libmodplug.
 def empty_sample(header):
     return header.size < 2
 
@@ -39,9 +40,19 @@ def padding_length(x):
     header = x._.sample_headers[x._index]
     return 2 if not empty_sample(header) else 0
 
+class EOFPaddedBytes(Bytes):
+    def _parse(self, stream, context, path):
+        length = self.length(context) if callable(self.length) \
+            else self.length
+        data = stream.read(length)
+        n_padding = length - len(data)
+        assert n_padding >= 0
+        data += bytes([0] * n_padding)
+        return data
+
 SampleData = Struct(
     Padding(padding_length),
-    'bytes' / Bytes(sample_length)
+    'bytes' / EOFPaddedBytes(sample_length)
 )
 
 Module = Struct(

@@ -31,6 +31,10 @@ def test_protracker_15_sample_module():
     for i in range(15, 31):
         assert len(mod.samples[i].bytes) == 0
 
+def test_loading_truncated_module():
+    mod = load_file(TEST_PATH / 'after-the-rain.mod')
+    assert len(mod.samples[8].bytes) == 7988
+
 def percussive_samples(mod):
     rows = linearize_rows(mod)
     notes = list(notes_in_rows(mod, rows))
