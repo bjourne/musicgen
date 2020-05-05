@@ -2,6 +2,10 @@
 from construct import *
 from construct.core import encodingunit
 
+# To improve:
+#
+#  * Handle incorrect loop starts.
+#  * Handle ADPCM decompression.
 class MyStringEncoded(StringEncoded):
     def __init__(self, subcon, encoding, errors):
         super().__init__(subcon, encoding)
@@ -55,11 +59,7 @@ def empty_sample(header):
 def sample_length(x):
     '''Length of the sample in bytes.'''
     header = x._.sample_headers[x._index]
-    return header.size * 2 - 2 if not empty_sample(header) else 0
-
-def padding_length(x):
-    header = x._.sample_headers[x._index]
-    return 2 if not empty_sample(header) else 0
+    return header.size * 2 if not empty_sample(header) else 0
 
 class EOFPaddedBytes(Bytes):
     def _parse(self, stream, context, path):
@@ -72,7 +72,7 @@ class EOFPaddedBytes(Bytes):
         return data
 
 SampleData = Struct(
-    Padding(padding_length),
+    # Two first bytes are usually silence.
     'bytes' / EOFPaddedBytes(sample_length)
 )
 

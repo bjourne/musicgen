@@ -33,7 +33,7 @@ def test_protracker_15_sample_module():
 
 def test_loading_truncated_module():
     mod = load_file(TEST_PATH / 'after-the-rain.mod')
-    assert len(mod.samples[8].bytes) == 7988
+    assert len(mod.samples[8].bytes) == 7990
 
 def percussive_samples(mod):
     rows = linearize_rows(mod)
@@ -43,7 +43,7 @@ def percussive_samples(mod):
 
 def test_sample_length():
     mod = load_file(TEST_PATH / 'his_hirsute_ant.mod')
-    assert len(mod.samples[0].bytes) + 2 == 0x23ca
+    assert len(mod.samples[0].bytes) == 0x23ca
 
 # Testing heuristics for detecting percussive samples.
 def test_analyze():
@@ -68,3 +68,7 @@ def test_period_to_idx():
 
     idx = period_to_idx(56)
     assert PERIODS[idx] == 57
+
+def test_loading_tricky_mods():
+    mod = load_file(TEST_PATH / 'pachabel.mod')
+    assert len(mod.samples[2].bytes) == 0x1ee1c
