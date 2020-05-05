@@ -82,7 +82,7 @@ Module = Struct(
     'n_orders' / Byte,
     'restart_pos' / Byte,
     'pattern_table' / Bytes(128),
-    'initials' / Const(b'M.K.'),
+    'initials' / Bytes(4),
     'patterns' / Array(max_(this.pattern_table) + 1, Pattern),
     'samples' / Array(31, SampleData),
     'integrity' / Check(0 <= this.n_orders <= 128))
@@ -107,11 +107,11 @@ def load_file(fname):
     # module containing only 15 samples. Otherwise, if the magic is
     # the string "M.K." it is a ProTracker module containing 31
     # samples.
-    magic = arr[1080:1084].decode('utf-8')
+    magic = arr[1080:1084].decode('utf-8', 'ignore')
     if not magic.isprintable():
         print(f'{fname} is an STK. file')
         return ModuleSTK.parse(arr)
-    elif magic == 'M.K.':
+    elif magic in ('M.K.', 'FLT4'):
         return Module.parse(arr)
     raise ValueError(f'Unknown magic "{magic}"!')
 
