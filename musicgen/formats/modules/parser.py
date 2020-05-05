@@ -1,8 +1,29 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from construct import *
+from construct.core import encodingunit
+
+class MyStringEncoded(StringEncoded):
+    def __init__(self, subcon, encoding, errors):
+        super().__init__(subcon, encoding)
+        self.errors = errors
+
+    def _decode(self, obj, context, path):
+        return obj.decode(self.encoding, self.errors)
+
+def MyPaddedString(length, encoding, errors):
+    '''Like PaddedString but with the ability to ignore decoding
+    errors.'''
+    bytes_per_char = encodingunit(encoding)
+    null_stripped = NullStripped(GreedyBytes, pad = bytes_per_char)
+    fixed_sized = FixedSized(length, null_stripped)
+    macro = MyStringEncoded(fixed_sized, encoding, errors)
+    def _emitfulltype(ksy, bitwise):
+        return dict(size=length, type="strz", encoding=encoding)
+    macro._emitfulltype = _emitfulltype
+    return macro
 
 SampleHeader = Struct(
-    'name' / Bytes(22),
+    'name' / MyPaddedString(22, 'utf-8', 'replace'),
     'size' / Int16ub,
     'fine_tune' / Byte,
     'volume' / Byte,
@@ -56,7 +77,7 @@ SampleData = Struct(
 )
 
 Module = Struct(
-    'title' / PaddedString(20, 'utf-8'),
+    'title' / MyPaddedString(20, 'utf-8', 'replace'),
     'sample_headers' / Array(31, SampleHeader),
     'n_orders' / Byte,
     'restart_pos' / Byte,
@@ -67,7 +88,7 @@ Module = Struct(
     'integrity' / Check(0 <= this.n_orders <= 128))
 
 ModuleSTK = Struct(
-    'title' / PaddedString(20, 'utf-8'),
+    'title' / MyPaddedString(20, 'utf-8', 'replace'),
     'sample_headers' / Array(15, SampleHeader),
     'n_orders' / Byte,
     'restart_pos' / Byte,
