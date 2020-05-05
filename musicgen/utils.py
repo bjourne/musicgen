@@ -27,6 +27,8 @@ class StructuredPrinter:
     def leave(self):
         self.indent -= 2
 
+SP = StructuredPrinter(True)
+
 def sort_groupby(seq, keyfun):
     return groupby(sorted(seq, key = keyfun), keyfun)
 

@@ -1,10 +1,9 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-from argparse import ArgumentParser, FileType
 from collections import defaultdict
 from itertools import groupby
 from json import load
 from mido import Message, MidiFile, MidiTrack
-from musicgen.utils import StructuredPrinter, sort_groupby
+from musicgen.utils import SP, sort_groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.analyze import sample_props
 from musicgen.formats.modules.parser import load_file
@@ -97,6 +96,8 @@ def generate_conv_info(mod, notes):
             for (sample, p) in props}
 
 def main():
+    from argparse import ArgumentParser, FileType
+
     parser = ArgumentParser(description='Module stripper')
 
     parser.add_argument('module', type = FileType('rb'))
@@ -115,14 +116,15 @@ def main():
     args = parser.parse_args()
     args.module.close()
     args.midi.close()
-    sp = StructuredPrinter(args.info)
+
+    SP.enabled = args.info
 
     mod = load_file(args.module.name)
     rows = linearize_rows(mod)
-    sp.header('LINEARIZED ROWS')
+    SP.header('LINEARIZED ROWS')
     for row in rows:
-        sp.print(row_to_string(row))
-    sp.leave()
+        SP.print(row_to_string(row))
+    SP.leave()
 
     # Extract mod notes and sort/groupby channel
     notes = list(notes_in_rows(mod, rows))
@@ -137,12 +139,12 @@ def main():
         conv_info = load(args.json)
         conv_info = {int(k) : v for (k, v) in conv_info.items()}
 
-    sp.header('MIDI MAPPING', '%d samples', len(conv_info))
-    sp.print('sample midi base dur vol')
+    SP.header('MIDI MAPPING', '%d samples', len(conv_info))
+    SP.print('sample midi base dur vol')
     fmt = '%6d %4d %4d %3d %3.1f'
     for sample_idx, midi_def in conv_info.items():
-        sp.print(fmt, (sample_idx,) + tuple(midi_def))
-    sp.leave()
+        SP.print(fmt, (sample_idx,) + tuple(midi_def))
+    SP.leave()
 
     # Convert to midi notes
     notes_per_channel = [list(midi_notes(conv_info, notes))
