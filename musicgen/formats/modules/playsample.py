@@ -71,7 +71,7 @@ def main():
     freq = FREQS[note_idx]
     for sample_idx in sample_indices:
         header = mod.sample_headers[sample_idx]
-        name = header.name.decode('utf-8', 'ignore')
+        name = header.name
         volume = args.volume
         if not args.volume:
             volume = header.volume
