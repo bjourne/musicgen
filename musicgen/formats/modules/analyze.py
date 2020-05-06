@@ -78,9 +78,15 @@ def get_sample_props(mod, sample, notes):
 
     # Guess whether the sample is for a percussive instrument.
     is_percussive = False
+
     if n_unique <= 2 and max_ringout <= 0.15:
         is_percussive = True
+
+    # Sample is not repeating
     if repeat_pct == 1.0:
+        # Always percussive if only one note is played.
+        if n_unique == 1:
+            is_percussive = True
         if most_common_freq > 0.9 and n_unique <= 2:
             if max_ringout < 0.6:
                 is_percussive = True
@@ -145,6 +151,7 @@ def main():
     args.module.close()
 
     mod = load_file(args.module.name)
+    print(mod.title)
     rows = linearize_rows(mod)
     notes = list(notes_in_rows(mod, rows))
     props = sample_props(mod, notes)

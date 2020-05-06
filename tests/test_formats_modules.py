@@ -46,7 +46,7 @@ def test_sample_length():
     assert len(mod.samples[0].bytes) == 0x23ca
 
 # Testing heuristics for detecting percussive samples.
-def test_analyze():
+def test_percussive_samples():
     mod = load_file(TEST_PATH / 'androidr.mod')
     assert percussive_samples(mod) == {2, 3, 4}
 
@@ -61,6 +61,10 @@ def test_analyze():
 
     mod = load_file(TEST_PATH / 'mist-eek.mod')
     assert percussive_samples(mod) == {10, 11, 12}
+
+    # 1 and 2 are chord samples incorrectly classified as drums.
+    mod = load_file(TEST_PATH / 'afro_afro.mod')
+    assert percussive_samples(mod) == {1, 2, 5, 6, 7, 8}
 
 def test_period_to_idx():
     idx = period_to_idx(679)
