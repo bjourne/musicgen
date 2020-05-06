@@ -3,7 +3,7 @@
 # I couldn't get the torrents working. Hence this tool.
 from collections import defaultdict
 from lxml import html
-from musicgen.utils import StructuredPrinter
+from musicgen.utils import SP
 from pathlib import Path
 from requests import get
 from sys import exit
@@ -14,8 +14,6 @@ FIRST_RESULTS_FMT = 'https://modarchive.org' \
 
 RESULTS_PAGE_FMT = 'https://modarchive.org' \
     '/index.php?query=%d&request=search&search_type=genre&page=%d'
-
-SP = StructuredPrinter(True)
 
 def get_url(url, delay = 0.2):
     SP.print('GET %s' % url)
@@ -257,9 +255,9 @@ def main():
     parser.add_argument(
         '--corpus-path', required = True,
         help = 'Path to corpus')
-    parser.add_argument('--info',
-                        help = 'Print information',
-                        action = 'store_true')
+    parser.add_argument(
+        '--info', action = 'store_true',
+        help = 'Print information')
 
     subparser = parser.add_subparsers(dest = 'subparser')
 

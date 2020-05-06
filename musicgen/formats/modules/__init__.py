@@ -1,6 +1,7 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from bisect import bisect_left, bisect_right
 from collections import namedtuple
+from musicgen.utils import SP
 import numpy as np
 
 PERIODS = [
@@ -20,7 +21,7 @@ def period_to_idx(period):
         idx = bisect_left(rev_periods, period)
 
         if idx > 0:
-            print('found ', rev_periods[idx - 1], 'for', period)
+            pass
         else:
             idx = 1
         idx = 60 - idx
@@ -189,7 +190,7 @@ def notes_in_rows(mod, rows):
             # Sample but no note
             if sample_idx and not period:
                 fmt = 'Missing period for sample %2d at cell %4d:%d.'
-                print(fmt % (sample_idx, row_idx, col_idx))
+                SP.print(fmt % (sample_idx, row_idx, col_idx))
                 continue
 
             # Period but no sample
@@ -201,7 +202,7 @@ def notes_in_rows(mod, rows):
                     print(fmt % (row_idx, col_idx))
                     continue
                 fmt = 'Using last sample at cell %4d:%d'
-                print(fmt % (row_idx, col_idx))
+                SP.print(fmt % (row_idx, col_idx))
                 sample_idx = channel_samples[col_idx]
 
             note_idx = period_to_idx(period)
