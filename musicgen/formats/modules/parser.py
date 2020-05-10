@@ -109,9 +109,8 @@ def load_file(fname):
     # samples.
     magic = arr[1080:1084].decode('utf-8', 'ignore')
     if not magic.isprintable():
-        print(f'{fname} is an STK. file')
         return ModuleSTK.parse(arr)
-    elif magic in ('M.K.', 'FLT4'):
+    elif magic in ('4CHN', 'M.K.', 'FLT4', 'M&K!'):
         return Module.parse(arr)
     raise ValueError(f'Unknown magic "{magic}"!')
 

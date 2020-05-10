@@ -31,6 +31,11 @@ def test_protracker_15_sample_module():
     for i in range(15, 31):
         assert len(mod.samples[i].bytes) == 0
 
+def test_weird_magic():
+    # This mod has the signature "M&K!"
+    mod = load_file(TEST_PATH / 'im_a_hedgehog.mod')
+    assert mod.n_orders == 13
+
 def test_loading_truncated_module():
     mod = load_file(TEST_PATH / 'after-the-rain.mod')
     assert len(mod.samples[8].bytes) == 7990
