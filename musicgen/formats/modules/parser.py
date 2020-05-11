@@ -98,19 +98,24 @@ ModuleSTK = Struct(
     'integrity' / Check(0 <= this.n_orders <= 128)
     )
 
+class PowerPackerModule(ValueError):
+    pass
+
 def load_file(fname):
     with open(fname, 'rb') as f:
         arr = bytearray(f.read())
-
+    if arr[:4].decode('utf-8', 'ignore') == 'PP20':
+        raise PowerPackerModule()
     # The magic at offset 1080 determines type of module. If the magic
     # is not a printable ascii string, the module is a Sound Tracker
     # module containing only 15 samples. Otherwise, if the magic is
     # the string "M.K." it is a ProTracker module containing 31
     # samples.
     magic = arr[1080:1084].decode('utf-8', 'ignore')
+    signatures_4chan = ['4CHN', 'M.K.', 'FLT4', 'M!K!', 'M&K!']
     if not magic.isprintable():
         return ModuleSTK.parse(arr)
-    elif magic in ('4CHN', 'M.K.', 'FLT4', 'M&K!'):
+    elif magic in signatures_4chan:
         return Module.parse(arr)
     raise ValueError(f'Unknown magic "{magic}"!')
 

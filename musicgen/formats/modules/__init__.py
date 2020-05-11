@@ -78,7 +78,7 @@ EFFECT_CMD_UPDATE_TIMING  = 15
 
 def period_to_string(period):
     if period == 0:
-        return '---'
+        return '...'
     idx = period_to_idx(period)
     octave_idx = idx // 12
     note_idx = idx % 12
@@ -89,7 +89,10 @@ def cell_to_string(cell):
     note = period_to_string(cell.period)
     effect_val = (cell.effect_cmd << 8) \
                  + (cell.effect_arg1 << 4) + (cell.effect_arg2)
-    return '%s %02X %03X' % (note, cell.sample_idx, effect_val)
+    sample_idx = cell.sample_idx
+    sample_str = '%02X' % sample_idx if sample_idx else '..'
+    effect_str = '%03X' % effect_val if effect_val else '...'
+    return '%s %s %s' % (note, sample_str, effect_str)
 
 def row_to_string(row):
     return '  '.join(map(cell_to_string, row))
@@ -97,7 +100,7 @@ def row_to_string(row):
 def rows_to_string(rows, numbering = False):
     strings = [row_to_string(row) for row in rows]
     if numbering:
-        strings = ['#%03d %s' % (i, row) for i, row in enumerate(strings)]
+        strings = ['#%04d %s' % (i, row) for i, row in enumerate(strings)]
     return '\n'.join(strings)
 
 def pattern_to_string(pattern):
@@ -185,6 +188,10 @@ def notes_in_rows(mod, rows):
             period = cell.period
             # Neither sample nor note, skipping
             if not sample_idx and not period:
+                continue
+
+            # Corrupt mod with bad sample_idx
+            if not sample_idx <= 0x1f:
                 continue
 
             # Sample but no note
