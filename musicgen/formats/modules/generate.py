@@ -268,7 +268,7 @@ def run_training(corpus_path, model_path, seq_len, step):
         model.load_weights(weights_path)
 
     batch_size = 128
-    bg_train = CustomGenerator(int_seq, batch_size, seq_len, n_chars)
+    gen = CustomGenerator(int_seq, batch_size, seq_len, n_chars)
 
     cb_checkpoint = ModelCheckpoint(
         str(weights_path),
@@ -283,11 +283,12 @@ def run_training(corpus_path, model_path, seq_len, step):
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
 
     callbacks = [cb_checkpoint, cb_generate]
-    model.fit_generator(generator = bg_train,
+    model.fit_generator(generator = gen,
                         steps_per_epoch = len(seq) // batch_size,
                         epochs = 10,
                         verbose = 1,
-                        shuffle = True)
+                        shuffle = False,
+                        callbacks = callbacks)
 
 def main_cmd_line():
     parser = ArgumentParser(description = 'Music ML')
@@ -302,7 +303,7 @@ def main_cmd_line():
         help = 'Print information')
     parser.add_argument(
         '--seq-len', required = True, type = int,
-        help = 'Length of training sequence (multiple of 4)')
+        help = 'Length of training sequence')
     args = parser.parse_args()
     SP.enabled = args.info
 
