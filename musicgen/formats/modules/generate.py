@@ -27,8 +27,7 @@ def compute_advances(delta):
             delta -= threshold
     assert delta == 0
 
-def channel_to_sequence(rows, col_idx):
-    yield 'break', 0
+def column_to_sequence(rows, col_idx):
     last_row = None
     last_sample = None
     for row_idx, row in enumerate(rows):
@@ -46,6 +45,7 @@ def channel_to_sequence(rows, col_idx):
             continue
 
         if sample_diff or note != -1:
+            # Need to fix this somehow
             if last_row is None:
                 delta = row_idx
             else:
@@ -67,10 +67,11 @@ def channel_to_sequence(rows, col_idx):
     for adv in compute_advances(n_trailer):
         assert adv > 0
         yield 'advance', adv
+    yield 'break', 0
 
 def rows_to_sequence(rows):
     for col_idx in range(4):
-        for ev in channel_to_sequence(rows, col_idx):
+        for ev in column_to_sequence(rows, col_idx):
             yield ev
 
 def mod_to_sequence(fname):
@@ -103,18 +104,21 @@ def build_cell(sample, note, effect_cmd, effect_arg):
 
 ZERO_CELL = build_cell(0, -1, 0, 0)
 
-def sequence_to_rows(seq):
-    col_idx = -1
+def sequence_to_columns(seq):
     sample = None
-    cols = [[], [], [], []]
-    advances = [0, 0, 0, 0]
+    col = []
+    advance = 0
     for cmd, arg in seq:
         if cmd == 'break':
-            col_idx += 1
+            # Emit current colun
+            col += [ZERO_CELL for _ in range(advance)]
+            yield col
+            col = []
+            advance = 0
+            sample = None
         if cmd == 'set_sample':
             sample = arg
         if cmd == 'play':
-
             # If sample is None the play command is invalid and we
             # have to ingore it.
             if sample is None:
@@ -122,17 +126,31 @@ def sequence_to_rows(seq):
                 continue
 
             # Flush saved advances for col.
-            spacing = [ZERO_CELL for _ in range(advances[col_idx])]
-            cols[col_idx].extend(spacing)
-            advances[col_idx] = 0
+            spacing = [ZERO_CELL for _ in range(advance)]
+            col += spacing
+            advance = 0
             cell = build_cell(sample, arg, 0, 0)
-            cols[col_idx].append(cell)
+            col.append(cell)
         if cmd == 'advance':
-            advances[col_idx] += arg
+            advance += arg
+    col += [ZERO_CELL for _ in range(advance)]
+    yield col
 
-    for col, advance in zip(cols, advances):
-        col.extend([ZERO_CELL for _ in range(advance)])
-    return list(zip(*cols))
+def columns_to_rows(cols):
+    # Take the four first:
+    cols = list(cols)[:4]
+
+    # Pad with missing channels
+    cols = cols + [[] for _ in range(4 - len(cols))]
+
+    # Pad with empty cells
+    max_len = max(len(col) for col in cols)
+    cols = [col + [ZERO_CELL] * (max_len - len(col))
+            for col in cols]
+    return zip(*cols)
+
+def sequence_to_rows(seq):
+    return list(columns_to_rows(sequence_to_columns(seq)))
 
 def get_sequence_from_disk(corpus_path, mods):
     SP.header('PARSING', '%d modules', len(mods))
@@ -163,12 +181,6 @@ def get_sequence(corpus_path, model_path):
     with open(cache_path, 'rb') as f:
         return load(f)
 
-def create_samples(seq, seq_len, step):
-    for i in range(0, len(seq) - seq_len, step):
-        inp = seq[i:i + seq_len]
-        out = seq[i + seq_len]
-        yield inp, out
-
 def make_model(seq_len, n_chars):
     model = Sequential()
     model.add(LSTM(128, input_shape=(seq_len, n_chars)))
@@ -188,54 +200,6 @@ def weighted_sample(probs, temperature):
     probas = np.random.multinomial(1, probs, 1)
     return np.argmax(probas)
 
-def generate(model, pattern, n_notes, n_chars, temp):
-    for i in range(n_notes):
-        inp = np.reshape(pattern, (1, len(pattern), 1))
-        inp = inp / n_chars
-        pred = model.predict(inp, verbose = 0)[0]
-
-        idx = np.argmax(pred)
-        if temp is None:
-            rnd_idx = np.random.choice(len(pred), p = pred)
-        else:
-            rnd_idx = weighted_sample(pred, temp)
-        if i % 100 == 0:
-            fmt = '#%3d %3d %.4f %3d %.4f'
-            print(fmt % (i, idx, pred[idx], rnd_idx, pred[rnd_idx]))
-        yield rnd_idx
-        pattern = pattern[1:] + [rnd_idx]
-
-def generate_sequence(model, sel_X, n_chars, n_cells,
-                      int2el, temp, fname):
-    fmt = 'Generating %d rows with temperature %.2f to "%s".'
-    SP.print(fmt, (n_cells / 4, temp or 0.0, fname))
-    indices = generate(model, sel_X, n_notes, n_chars, temp)
-    cells = [int2el[idx] for idx in indices]
-    SP.print('Cells %s', cells)
-    with open(fname, 'wb') as f:
-        dump(cells, f)
-
-def generate_sequences(model, X, n_chars, n_notes, int2el):
-    SP.header('GENERATE')
-    sel_X = choice(X)
-    for temp in [None, 0.2, 0.5, 1.0, 1.2]:
-        if temp is None:
-            fname = 'test_rnd'
-        else:
-            fname = 'test_%.2f' % temp
-        fname = fname.replace('.', '_') + '.pickle'
-        generate_sequence(model, sel_X, n_chars, n_notes,
-                          int2el, temp, fname)
-    SP.leave()
-
-def weighted_sample(probs, temperature):
-    probs = np.array(probs).astype('float64')
-    probs = np.log(probs) / temperature
-    exp_probs = np.exp(probs)
-    probs = exp_probs / np.sum(exp_probs)
-    probas = np.random.multinomial(1, probs, 1)
-    return np.argmax(probas)
-
 def generate_chars(model, seed, n_generate, temp, char2idx, idx2char):
     seq_len = len(seed)
     n_chars = len(char2idx)
@@ -244,7 +208,10 @@ def generate_chars(model, seed, n_generate, temp, char2idx, idx2char):
         for t, idx in enumerate(seed):
             X[0, t, idx] = 1
         P = model.predict(X, verbose = 0)[0]
-        idx = weighted_sample(P, temp)
+        if temp is None:
+            idx = np.random.choice(len(P), p = P)
+        else:
+            idx = weighted_sample(P, temp)
         yield idx
         seed = seed[1:] + [idx]
 
@@ -253,43 +220,48 @@ def generate_music(model, n_epoch, seq, seq_len,
     SP.header('EPOCH', '%d', n_epoch)
     idx = randrange(len(seq) - seq_len)
     seed = list(seq[idx:idx + seq_len])
-    for temp in [0.2, 0.5, 1.0, 1.2]:
-        SP.header('TEMPERATURE', '%.2f', temp)
+    for temp in [None, 0.2, 0.5, 1.0, 1.2]:
+        fmt = '%s' if temp is None else '%.2f'
+        SP.header('TEMPERATURE', fmt, temp)
         generated = [idx2char[i]
                      for i in generate_chars(model, seed,
-                                             180, temp,
+                                             300, temp,
                                              char2idx, idx2char)]
+        SP.print(str(generated))
         rows = sequence_to_rows(generated)
         for row in rows:
             SP.print(row_to_string(row))
         SP.leave()
     SP.leave()
 
-def run_training(corpus_path, model_path, seq_len, step):
+def run_training(corpus_path, model_path, win_size, step):
     seq = get_sequence(corpus_path, model_path)
-    seq = seq[:len(seq) // 10]
+
 
     # Different tokens in sequence
     chars = sorted(set(seq))
-    n_chars = len(chars)
+    vocab_size = len(chars)
     char2idx = {c : i for i, c in enumerate(chars)}
     idx2char = {i : c for i, c in enumerate(chars)}
+
+    # Cut sequence
+    seq = seq[:len(seq) // 100]
 
     # Convert to integer sequence
     int_seq = np.array([char2idx[c] for c in seq])
 
     SP.print(f'Training model with %d tokens and %d characters.',
-             (len(seq), n_chars))
+             (len(seq), vocab_size))
 
-    model = make_model(seq_len, n_chars)
+    model = make_model(win_size, vocab_size)
 
     weights_path = model_path / 'weights.hdf5'
     if weights_path.exists():
         SP.print(f'Loading existing weights from "{weights_path}".')
         model.load_weights(weights_path)
 
-    batch_size = 128
-    gen = OneHotGenerator(int_seq, batch_size, seq_len, n_chars)
+    batch_size = 64
+    gen = OneHotGenerator(int_seq, batch_size, win_size, vocab_size)
 
     cb_checkpoint = ModelCheckpoint(
         str(weights_path),
@@ -300,7 +272,7 @@ def run_training(corpus_path, model_path, seq_len, step):
     )
 
     def on_epoch_begin(n_epoch, logs):
-        generate_music(model, n_epoch, int_seq, seq_len,
+        generate_music(model, n_epoch, int_seq, win_size,
                        char2idx, idx2char)
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
 
@@ -324,7 +296,7 @@ def main_cmd_line():
         '--info', action = 'store_true',
         help = 'Print information')
     parser.add_argument(
-        '--seq-len', required = True, type = int,
+        '--win-size', required = True, type = int,
         help = 'Length of training sequence')
     args = parser.parse_args()
     SP.enabled = args.info
@@ -333,22 +305,28 @@ def main_cmd_line():
     model_path = Path(args.model_path)
 
     # Should step be configurable too?
-    seq_len = args.seq_len
+    win_size = args.win_size
     step = 1
 
-    run_training(corpus_path, model_path, seq_len, step)
+    run_training(corpus_path, model_path, win_size, step)
 
 def parse_unparse():
     fname = argv[1]
     mod = load_file(fname)
-    rows = linearize_rows(mod)
-    print('BEFORE')
-    print(rows_to_string(rows, numbering = True))
-    seq = rows_to_sequence(rows)
-    print('AFTER')
-    rows = sequence_to_rows(seq)
-    print(rows_to_string(rows))
+    rows1 = linearize_rows(mod)
+    #print('BEFORE')
+    #print(rows_to_string(rows1, numbering = True))
+    seq = rows_to_sequence(rows1)
+    #print('AFTER')
+    rows2 = sequence_to_rows(seq)
+    #print(rows_to_string(rows2, numbering = True))
+    assert len(rows1) == len(rows2)
+    for row1, row2 in zip(rows1, rows2):
+        for cell1, cell2 in zip(row1, row2):
+            assert cell1.sample_idx == cell2.sample_idx
+            note1 = period_to_idx(cell1.period)
+            note2 = period_to_idx(cell2.period)
+            assert note1 == note2
 
 if __name__ == '__main__':
-    #parse_unparse()
     main_cmd_line()
