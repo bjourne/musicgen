@@ -48,6 +48,7 @@ def duration_and_jump(duration, row_delta):
 
 INSN_JUMP = 'jump'
 INSN_PLAY = 'play'
+INSN_SAMPLE = 'sample'
 
 # 100 is a magic number and means the value is either random or
 # required to be inputted from the outside.
@@ -96,7 +97,7 @@ def column_to_mycode(rows, col_idx):
 
         sample_val = get_sample_val(last_sample_idx, sample_idx)
         if sample_val is not None:
-            yield 'sample', sample_val
+            yield INSN_SAMPLE, sample_val
 
         play_val = get_play_val(last_note_idx, note_idx)
         yield INSN_PLAY, play_val

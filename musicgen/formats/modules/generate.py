@@ -8,187 +8,25 @@ from keras.layers import (Activation, BatchNormalization, Dense, Dropout,
 from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
-from musicgen.formats.modules import *
-from musicgen.formats.modules.corpus import load_index
-from musicgen.formats.modules.parser import (Cell, PowerPackerModule,
-                                             load_file)
+from musicgen.formats.modules.mycode import (get_sequence,
+                                             prettyprint_mycode)
 from musicgen.utils import OneHotGenerator, SP
+from os import environ
 from pathlib import Path
 from pickle import dump, load
 from random import choice, randint, randrange
 from sys import argv
 import numpy as np
 
-def compute_advances(delta):
-    thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
-    for threshold in thresholds:
-        while delta >= threshold:
-            yield threshold
-            delta -= threshold
-    assert delta == 0
-
-def column_to_sequence(rows, col_idx):
-    last_row = None
-    last_sample = None
-    for row_idx, row in enumerate(rows):
-        cell = row[col_idx]
-        sample = cell.sample_idx
-        note = -1 if not cell.period else period_to_idx(cell.period)
-        sample_diff = sample != 0 and sample != last_sample
-
-        # This skip can cause the wrong sample to be selected for some
-        # notes. But most of the time, it won't.
-        if sample != 0 and note == -1:
-            continue
-        if not sample <= 0x1f:
-            SP.print('Skipping invalid sample %d in module.', sample)
-            continue
-
-        if sample_diff or note != -1:
-            # Need to fix this somehow
-            if last_row is None:
-                delta = row_idx
-            else:
-                delta = row_idx - last_row - 1
-            assert delta >= 0
-            for adv in compute_advances(delta):
-                assert adv > 0
-                yield 'advance', adv
-            last_row = row_idx
-        if sample_diff:
-            yield 'set_sample', sample
-            last_sample = sample
-        if note != -1:
-            yield 'play', note
-    if last_row is not None:
-        n_trailer = len(rows) - last_row - 1
-    else:
-        n_trailer = len(rows)
-    for adv in compute_advances(n_trailer):
-        assert adv > 0
-        yield 'advance', adv
-    yield 'break', 0
-
-def rows_to_sequence(rows):
-    for col_idx in range(4):
-        for ev in column_to_sequence(rows, col_idx):
-            yield ev
-
-def mod_to_sequence(fname):
-    SP.print(str(fname))
-    try:
-        mod = load_file(fname)
-    except PowerPackerModule:
-        SP.print('Skipping PP20 module.')
-        return []
-    rows = linearize_rows(mod)
-    return rows_to_sequence(rows)
-
-def build_cell(sample, note, effect_cmd, effect_arg):
-    if note == -1:
-        period = 0
-    else:
-        period = PERIODS[note]
-    sample_lo = sample & 0xf
-    sample_hi = sample >> 4
-    sample_idx = (sample_hi << 4) + sample_lo
-    effect_arg1 = effect_arg >> 4
-    effect_arg2 = effect_arg & 0xf
-    return Container(dict(period = period,
-                          sample_lo = sample_lo,
-                          sample_hi = sample_hi,
-                          sample_idx = sample_idx,
-                          effect_cmd = effect_cmd,
-                          effect_arg1 = effect_arg1,
-                          effect_arg2 = effect_arg2))
-
-ZERO_CELL = build_cell(0, -1, 0, 0)
-
-def sequence_to_columns(seq):
-    sample = None
-    col = []
-    advance = 0
-    for cmd, arg in seq:
-        if cmd == 'break':
-            # Emit current colun
-            col += [ZERO_CELL for _ in range(advance)]
-            yield col
-            col = []
-            advance = 0
-            sample = None
-        if cmd == 'set_sample':
-            sample = arg
-        if cmd == 'play':
-            # If sample is None the play command is invalid and we
-            # have to ingore it.
-            if sample is None:
-                SP.print('Ignoring play command without sample.')
-                continue
-
-            # Flush saved advances for col.
-            spacing = [ZERO_CELL for _ in range(advance)]
-            col += spacing
-            advance = 0
-            cell = build_cell(sample, arg, 0, 0)
-            col.append(cell)
-        if cmd == 'advance':
-            advance += arg
-    col += [ZERO_CELL for _ in range(advance)]
-    yield col
-
-def columns_to_rows(cols):
-    # Take the four first:
-    cols = list(cols)[:4]
-
-    # Pad with missing channels
-    cols = cols + [[] for _ in range(4 - len(cols))]
-
-    # Pad with empty cells
-    max_len = max(len(col) for col in cols)
-    cols = [col + [ZERO_CELL] * (max_len - len(col))
-            for col in cols]
-    return zip(*cols)
-
-def sequence_to_rows(seq):
-    return list(columns_to_rows(sequence_to_columns(seq)))
-
-def get_sequence_from_disk(corpus_path, mods):
-    SP.header('PARSING', '%d modules', len(mods))
-    fnames = [corpus_path / mod.genre / mod.fname for mod in mods]
-    seq = sum([list(mod_to_sequence(fname))
-               for fname in fnames], [])
-    SP.leave()
-    return seq
-
-def get_sequence(corpus_path, model_path):
-    index = load_index(corpus_path)
-    mods = [mod for mod in index.values()
-            if (mod.n_channels == 4
-                and mod.format == 'MOD'
-                and mod.kb_size <= 150)]
-
-    key = sum(mod.kb_size for mod in mods)
-    cache_file = 'cache-064-%010d.pickle' % key
-    cache_path = model_path / cache_file
-    if not cache_path.exists():
-        model_path.mkdir(parents = True, exist_ok = True)
-        seq = get_sequence_from_disk(corpus_path, mods)
-        with open(cache_path, 'wb') as f:
-            dump(seq, f)
-    else:
-        SP.print('Using cache at %s.', cache_path)
-    assert cache_path.exists()
-    with open(cache_path, 'rb') as f:
-        return load(f)
+environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 def make_model(seq_len, n_chars):
     model = Sequential()
-    model.add(LSTM(128, input_shape=(seq_len, n_chars)))
+    model.add(LSTM(256, input_shape=(seq_len, n_chars)))
     model.add(Dense(n_chars))
     model.add(Activation('softmax'))
-    optimizer = RMSprop(lr = 0.01)
     model.compile(loss = 'categorical_crossentropy',
-                  optimizer = optimizer)
+                  optimizer = 'adam')
     print(model.summary())
     return model
 
@@ -223,18 +61,18 @@ def generate_music(model, n_epoch, seq, seq_len,
     for temp in [None, 0.2, 0.5, 1.0, 1.2]:
         fmt = '%s' if temp is None else '%.2f'
         SP.header('TEMPERATURE', fmt, temp)
-        generated = [idx2char[i]
-                     for i in generate_chars(model, seed,
-                                             300, temp,
-                                             char2idx, idx2char)]
-        SP.print(str(generated))
-        rows = sequence_to_rows(generated)
-        for row in rows:
-            SP.print(row_to_string(row))
+        mycode = [idx2char[i]
+                  for i in generate_chars(model, seed,
+                                          100, temp,
+                                          char2idx, idx2char)]
+        prettyprint_mycode(mycode)
+        # rows = sequence_to_rows(generated)
+        # for row in rows:
+        #     SP.print(row_to_string(row))
         SP.leave()
     SP.leave()
 
-def run_training(corpus_path, model_path, win_size, step):
+def run_training(corpus_path, model_path, win_size, step, batch_size):
     seq = get_sequence(corpus_path, model_path)
 
 
@@ -260,7 +98,6 @@ def run_training(corpus_path, model_path, win_size, step):
         SP.print(f'Loading existing weights from "{weights_path}".')
         model.load_weights(weights_path)
 
-    batch_size = 64
     gen = OneHotGenerator(int_seq, batch_size, win_size, vocab_size)
 
     cb_checkpoint = ModelCheckpoint(
@@ -308,25 +145,7 @@ def main_cmd_line():
     win_size = args.win_size
     step = 1
 
-    run_training(corpus_path, model_path, win_size, step)
-
-def parse_unparse():
-    fname = argv[1]
-    mod = load_file(fname)
-    rows1 = linearize_rows(mod)
-    #print('BEFORE')
-    #print(rows_to_string(rows1, numbering = True))
-    seq = rows_to_sequence(rows1)
-    #print('AFTER')
-    rows2 = sequence_to_rows(seq)
-    #print(rows_to_string(rows2, numbering = True))
-    assert len(rows1) == len(rows2)
-    for row1, row2 in zip(rows1, rows2):
-        for cell1, cell2 in zip(row1, row2):
-            assert cell1.sample_idx == cell2.sample_idx
-            note1 = period_to_idx(cell1.period)
-            note2 = period_to_idx(cell2.period)
-            assert note1 == note2
+    run_training(corpus_path, model_path, win_size, step, 128)
 
 if __name__ == '__main__':
     main_cmd_line()
