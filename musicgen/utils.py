@@ -67,3 +67,34 @@ class OneHotGenerator(Sequence):
                 X[i, j, self.seq[base + i + j]] = 1
             Y[i, self.seq[base + i + self.win_size]] = 1
         return X, Y
+
+# This algorithm is to slow to be practical.
+def find_longest_repeating_non_overlapping_subseq(seq):
+    candidates = []
+    for i in range(len(seq)):
+        candidate_max = len(seq[i + 1:]) // 2
+        for j in range(1, candidate_max + 1):
+            candidate, remaining = seq[i:i + j], seq[i + j:]
+            n_reps = 1
+            len_candidate = len(candidate)
+            while remaining[:len_candidate] == candidate:
+                n_reps += 1
+                remaining = remaining[len_candidate:]
+            if n_reps > 1:
+                candidates.append((seq[:i], n_reps, candidate, remaining))
+    if not candidates:
+        return (type(seq)(), 1, seq, type(seq)())
+
+    def score_candidate(candidate):
+        intro, reps, loop, outro = candidate
+        return reps - len(intro) - len(outro)
+    return sorted(candidates, key = score_candidate)[-1]
+
+
+if __name__ == '__main__':
+    seq = 'EEEFGAFFGAFFGAFCD'
+    print(find_longest_repeating_non_overlapping_substring(seq))
+    seq = 'ACCCCCCCCCA'
+    print(find_longest_repeating_non_overlapping_substring(seq))
+    seq = 'ABCD'
+    print(find_longest_repeating_non_overlapping_substring(seq))
