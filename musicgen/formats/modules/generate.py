@@ -8,12 +8,11 @@ from keras.layers import (Activation, BatchNormalization, Dense, Dropout,
 from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
-from keras.utils.np_utils import to_categorical
 from musicgen.formats.modules import *
 from musicgen.formats.modules.corpus import load_index
 from musicgen.formats.modules.parser import (Cell, PowerPackerModule,
                                              load_file)
-from musicgen.utils import SP
+from musicgen.utils import OneHotGenerator, SP
 from pathlib import Path
 from pickle import dump, load
 from random import choice, randint, randrange
@@ -115,7 +114,13 @@ def sequence_to_rows(seq):
         if cmd == 'set_sample':
             sample = arg
         if cmd == 'play':
-            assert sample != 0
+
+            # If sample is None the play command is invalid and we
+            # have to ingore it.
+            if sample is None:
+                SP.print('Ignoring play command without sample.')
+                continue
+
             # Flush saved advances for col.
             spacing = [ZERO_CELL for _ in range(advances[col_idx])]
             cols[col_idx].extend(spacing)
@@ -223,30 +228,46 @@ def generate_sequences(model, X, n_chars, n_notes, int2el):
                           int2el, temp, fname)
     SP.leave()
 
-class CustomGenerator(Sequence):
-    def __init__(self, int_seq, batch_size, seq_len, n_chars):
-        self.int_seq = int_seq
-        self.batch_size = batch_size
-        self.seq_len = seq_len
-        self.n_chars = n_chars
+def weighted_sample(probs, temperature):
+    probs = np.array(probs).astype('float64')
+    probs = np.log(probs) / temperature
+    exp_probs = np.exp(probs)
+    probs = exp_probs / np.sum(exp_probs)
+    probas = np.random.multinomial(1, probs, 1)
+    return np.argmax(probas)
 
-    def __len__(self):
-        return int(np.ceil(len(self.int_seq) / self.batch_size))
+def generate_chars(model, seed, n_generate, temp, char2idx, idx2char):
+    seq_len = len(seed)
+    n_chars = len(char2idx)
+    for _ in range(n_generate):
+        X = np.zeros((1, seq_len, n_chars))
+        for t, idx in enumerate(seed):
+            X[0, t, idx] = 1
+        P = model.predict(X, verbose = 0)[0]
+        idx = weighted_sample(P, temp)
+        yield idx
+        seed = seed[1:] + [idx]
 
-    def __getitem__(self, i):
-        base_idx = i * self.batch_size
-        X = np.zeros((self.batch_size, self.seq_len, self.n_chars),
-                     dtype = np.bool)
-        Y = np.zeros((self.batch_size, self.n_chars),
-                     dtype = np.bool)
-        for i in range(self.batch_size):
-            for j in range(self.seq_len):
-                X[i, j, self.int_seq[base_idx + i + j]] = 1
-            Y[i, self.int_seq[base_idx + i + self.seq_len]] = 1
-        return X, Y
+def generate_music(model, n_epoch, seq, seq_len,
+                   char2idx, idx2char):
+    SP.header('EPOCH', '%d', n_epoch)
+    idx = randrange(len(seq) - seq_len)
+    seed = list(seq[idx:idx + seq_len])
+    for temp in [0.2, 0.5, 1.0, 1.2]:
+        SP.header('TEMPERATURE', '%.2f', temp)
+        generated = [idx2char[i]
+                     for i in generate_chars(model, seed,
+                                             180, temp,
+                                             char2idx, idx2char)]
+        rows = sequence_to_rows(generated)
+        for row in rows:
+            SP.print(row_to_string(row))
+        SP.leave()
+    SP.leave()
 
 def run_training(corpus_path, model_path, seq_len, step):
     seq = get_sequence(corpus_path, model_path)
+    seq = seq[:len(seq) // 10]
 
     # Different tokens in sequence
     chars = sorted(set(seq))
@@ -268,7 +289,7 @@ def run_training(corpus_path, model_path, seq_len, step):
         model.load_weights(weights_path)
 
     batch_size = 128
-    gen = CustomGenerator(int_seq, batch_size, seq_len, n_chars)
+    gen = OneHotGenerator(int_seq, batch_size, seq_len, n_chars)
 
     cb_checkpoint = ModelCheckpoint(
         str(weights_path),
@@ -279,7 +300,8 @@ def run_training(corpus_path, model_path, seq_len, step):
     )
 
     def on_epoch_begin(n_epoch, logs):
-        pass
+        generate_music(model, n_epoch, int_seq, seq_len,
+                       char2idx, idx2char)
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
 
     callbacks = [cb_checkpoint, cb_generate]
