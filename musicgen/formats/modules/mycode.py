@@ -46,6 +46,9 @@ def duration_and_jump(duration, row_delta):
             return duration, row_delta - duration
         return row_delta, 0
 
+INSN_JUMP = 'jump'
+INSN_PLAY = 'play'
+
 # 100 is a magic number and means the value is either random or
 # required to be inputted from the outside.
 RANDOM_ARG = 100
@@ -72,47 +75,35 @@ def column_to_mycode(rows, col_idx):
     notes = list(column_to_notes(rows, col_idx))
 
     # Add two dummy notes
-    notes = [('dummy', 0, 0, 0)] \
-        + [('note', r, n, s) for (r, n, s) in notes] \
-        + [('dummy', len(rows), 0, 0)]
+    notes = [(0, 0, 0)] + notes + [(len(rows), 0, 0)]
 
     # Compute row deltas
-    notes = [(t1, r2 - r1, n1, s1)
-             for ((t1, r1, n1, s1), (t2, r2, n2, s2))
+    notes = [(r2 - r1, n1, s1) for ((r1, n1, s1), (r2, n2, s2))
              in zip(notes, notes[1:])]
+
+    # Maybe emit jumps
+    for jump in produce_jumps(notes[0][0]):
+        yield INSN_JUMP, jump
 
     last_duration = None
     last_note_idx = None
     last_sample_idx = None
-    for type, row_delta, note_idx, sample_idx in notes:
-        if type == 'dummy':
-            for jump in produce_jumps(row_delta):
-                yield 'jump', jump
-        else:
-            duration, jump = duration_and_jump(last_duration, row_delta)
-            if duration != last_duration:
-                yield 'dur', duration
-            last_duration = duration
+    for row_delta, note_idx, sample_idx in notes[1:]:
+        duration, jump = duration_and_jump(last_duration, row_delta)
+        if duration != last_duration:
+            yield 'dur', duration
+        last_duration = duration
 
-            sample_val = get_sample_val(last_sample_idx, sample_idx)
-            if sample_val is not None:
-                yield 'sample', sample_val
+        sample_val = get_sample_val(last_sample_idx, sample_idx)
+        if sample_val is not None:
+            yield 'sample', sample_val
 
-            play_val = get_play_val(last_note_idx, note_idx)
-            yield 'play', play_val
-
-            # if last_sample_idx is None:
-            #     yield 'sample', 0
-            # elif sample_idx != last_sample_idx:
-            #     yield 'sample', sample_idx - last_sample_idx
-            # if last_note_idx is None:
-            #     yield 'play', 0
-            # else:
-            #     yield 'play', note_idx - last_note_idx
-            for jmp in produce_jumps(jump):
-                yield 'jump', jmp
-            last_note_idx = note_idx
-            last_sample_idx = sample_idx
+        play_val = get_play_val(last_note_idx, note_idx)
+        yield INSN_PLAY, play_val
+        for jmp in produce_jumps(jump):
+            yield INSN_JUMP, jmp
+        last_note_idx = note_idx
+        last_sample_idx = sample_idx
 
 def pack_mycode(mycode):
     intro, reps, loop, outro \
