@@ -8,9 +8,11 @@ from keras.layers import (Activation, BatchNormalization, Dense, Dropout,
 from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
+from musicgen.formats.modules import row_to_string
 from musicgen.formats.modules.mycode import (get_sequence,
-                                             prettyprint_mycode)
-from musicgen.utils import OneHotGenerator, SP
+                                             mycode_to_rows)
+from musicgen.keras_utils import OneHotGenerator
+from musicgen.utils import SP
 from os import environ
 from pathlib import Path
 from pickle import dump, load
@@ -65,10 +67,11 @@ def generate_music(model, n_epoch, seq, seq_len,
                   for i in generate_chars(model, seed,
                                           100, temp,
                                           char2idx, idx2char)]
-        prettyprint_mycode(mycode)
+        rows = mycode_to_rows(mycode, None)
+        #prettyprint_mycode(mycode)
         # rows = sequence_to_rows(generated)
-        # for row in rows:
-        #     SP.print(row_to_string(row))
+        for row in rows:
+            SP.print(row_to_string(row))
         SP.leave()
     SP.leave()
 

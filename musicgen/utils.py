@@ -2,9 +2,7 @@
 #
 # Random utils.
 from itertools import groupby
-from keras.utils import Sequence, to_categorical
 import numpy as np
-
 
 class StructuredPrinter:
     def __init__(self, enabled):
@@ -40,36 +38,11 @@ def sort_groupby(seq, keyfun):
 def parse_comma_list(seq):
     return [int(e) for e in seq.split(',')]
 
-class OneHotGenerator(Sequence):
-    def __init__(self, seq, batch_size, win_size, vocab_size):
-        self.seq = seq
-        self.batch_size = batch_size
-        self.win_size = win_size
-        self.vocab_size = vocab_size
-
-    def __len__(self):
-        n_windows = len(self.seq) - self.win_size
-        return int(np.ceil(n_windows / self.batch_size))
-
-    def __getitem__(self, i):
-        base = i * self.batch_size
-
-        # Fix running over the dge.
-        n_windows = len(self.seq) - self.win_size
-        batch_size = min(n_windows - base, self.batch_size)
-
-        X = np.zeros((batch_size, self.win_size, self.vocab_size),
-                     dtype = np.bool)
-        Y = np.zeros((batch_size, self.vocab_size),
-                     dtype = np.bool)
-        for i in range(batch_size):
-            for j in range(self.win_size):
-                X[i, j, self.seq[base + i + j]] = 1
-            Y[i, self.seq[base + i + self.win_size]] = 1
-        return X, Y
-
 # This algorithm is to slow to be practical.
-def find_longest_repeating_non_overlapping_subseq(seq):
+def find_best_split(seq):
+    '''
+    Real name: find_longest_repeating_non_overlapping_subseq
+    '''
     candidates = []
     for i in range(len(seq)):
         candidate_max = len(seq[i + 1:]) // 2
@@ -90,11 +63,63 @@ def find_longest_repeating_non_overlapping_subseq(seq):
         return reps - len(intro) - len(outro)
     return sorted(candidates, key = score_candidate)[-1]
 
+# https://stackoverflow.com/questions/61758735/find-longest-adjacent-repeating-non-overlapping-substring
+def find_best_split2(s):
+    from collections import deque
+
+    # There are zcount equal characters starting
+    # at index starti.
+    def update(starti, zcount):
+        nonlocal bestlen
+        zcount += width
+        while zcount >= bestlen:
+            count = zcount - zcount % width
+            numreps = count // width
+            if numreps > 1 and count >= bestlen:
+                if count > bestlen:
+                    results.clear()
+                results.append((starti, width, numreps))
+                bestlen = count
+            zcount -= 1
+            starti += 1
+
+    bestlen, results = 0, []
+    if not s:
+        return 0, len(s), 1
+    t = deque(s)
+    for width in range(1, len(s) // 2 + 1):
+        t.popleft()
+        zcount = 0
+        for i, (a, b) in enumerate(zip(s, t)):
+            if a == b:
+                if not zcount: # new run starts here
+                    starti = i
+                zcount += 1
+            # else a != b, so equal run (if any) ended
+            elif zcount:
+                update(starti, zcount)
+                zcount = 0
+        if zcount:
+            update(starti, zcount)
+    if not results:
+        return 0, len(s), 1
+    return sorted(results, key = lambda x: x[2])[-1]
+
+def test_find_longest():
+    seq = 'EEEFGAFFGAFFGAFCD'
+    assert find_best_split(seq) == ('EEE', 3, 'FGAF', 'CD')
+    seq = 'ACCCCCCCCCA'
+    assert find_best_split(seq) == ('A', 9, 'C', 'A')
+    seq = 'ABCD'
+    assert find_best_split(seq) == ('', 1, 'ABCD', '')
+    seq = 'BAMBAMBAMBAM'
+    assert find_best_split(seq) == ('', 4, 'BAM', '')
+    res = find_best_split2([
+        'P2', 'P2', 'P2',
+        'P0', 'P0', 'P0',
+        'P-2', 'P-2', 'P-2',
+        'P0', 'P0', 'P0'])
+    assert res == (9, 1, 3)
 
 if __name__ == '__main__':
-    seq = 'EEEFGAFFGAFFGAFCD'
-    print(find_longest_repeating_non_overlapping_substring(seq))
-    seq = 'ACCCCCCCCCA'
-    print(find_longest_repeating_non_overlapping_substring(seq))
-    seq = 'ABCD'
-    print(find_longest_repeating_non_overlapping_substring(seq))
+    test_find_longest()

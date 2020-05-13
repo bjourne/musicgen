@@ -7,10 +7,10 @@ from itertools import groupby
 from musicgen.formats.modules import *
 from musicgen.formats.modules.corpus import load_index
 from musicgen.formats.modules.parser import PowerPackerModule, load_file
-from musicgen.utils import (SP,
-                            find_longest_repeating_non_overlapping_subseq)
+from musicgen.utils import SP, find_best_split, find_best_split2
 from pathlib import Path
 from pickle import dump, load
+from random import randint
 
 ########################################################################
 # Native format to mycode
@@ -46,9 +46,13 @@ def duration_and_jump(duration, row_delta):
             return duration, row_delta - duration
         return row_delta, 0
 
-INSN_JUMP = 'jump'
-INSN_PLAY = 'play'
-INSN_SAMPLE = 'sample'
+INSN_JUMP = 'J'
+INSN_DUR = 'D'
+INSN_PLAY = 'P'
+INSN_SAMPLE = 'S'
+INSN_PROGRAM = 'X'
+INSN_REPEAT = 'R'
+INSN_END_BLOCK = 'E'
 
 # 100 is a magic number and means the value is either random or
 # required to be inputted from the outside.
@@ -92,7 +96,7 @@ def column_to_mycode(rows, col_idx):
     for row_delta, note_idx, sample_idx in notes[1:]:
         duration, jump = duration_and_jump(last_duration, row_delta)
         if duration != last_duration:
-            yield 'dur', duration
+            yield INSN_DUR, duration
         last_duration = duration
 
         sample_val = get_sample_val(last_sample_idx, sample_idx)
@@ -107,21 +111,24 @@ def column_to_mycode(rows, col_idx):
         last_sample_idx = sample_idx
 
 def pack_mycode(mycode):
-    intro, reps, loop, outro \
-        = find_longest_repeating_non_overlapping_subseq(mycode)
-    if reps == 1:
+    starti, width, n_reps = find_best_split2(mycode)
+    if n_reps == 1:
         return mycode
-    return pack_mycode(intro) \
-        + [('repeat', reps)] + pack_mycode(loop) + [('end_block', 0)] \
-        + pack_mycode(outro)
+    SP.print('Packing code of length %d.', len(mycode))
+    intro = pack_mycode(mycode[:starti])
+    loop = pack_mycode(mycode[starti:starti + width])
+    outro = pack_mycode(mycode[starti + width * n_reps:])
+    return intro + [('repeat', n_reps)] + loop \
+        + [('end_block', 0)] + outro
 
 def rows_to_mycode(rows):
     for col_idx in range(4):
         mycode = list(column_to_mycode(rows, col_idx))
-        #mycode = pack_mycode(mycode)
+        # Still to slow.
+        # mycode = pack_mycode(mycode)
         for ev in mycode:
             yield ev
-        yield 'program', 0
+        yield INSN_PROGRAM, 0
 
 def mod_file_to_mycode(fname):
     SP.print(str(fname))
@@ -156,23 +163,54 @@ def build_cell(sample, note, effect_cmd, effect_arg):
 
 ZERO_CELL = build_cell(0, -1, 0, 0)
 
+# I have to work on this. OOB notes and samples and missing durations
+# should be handled better.
 def mycode_to_column(seq, sample, note):
     row_idx = 0
     col = []
+
     duration = None
+    first_note = True
+    first_sample = True
+
+    if sample is None:
+        sample = randint(3, 10)
+    if note is None:
+        note = randint(27, 30)
+
     for cmd, arg in seq:
-        if cmd == 'jump':
+        if cmd == INSN_JUMP:
             for _ in range(arg):
                 yield ZERO_CELL
-        elif cmd == 'dur':
+        elif cmd == INSN_DUR:
             duration = arg
-        elif cmd == 'sample':
-            if arg != RANDOM_ARG:
-                sample += arg
-        elif cmd == 'play':
-            if arg != RANDOM_ARG:
-                note += arg
+        elif cmd == INSN_SAMPLE:
+            if first_sample:
+                first_sample = False
+            else:
+                if arg == RANDOM_ARG:
+                    sample = randint(3, 10)
+                else:
+                    sample += arg
+        elif cmd == INSN_PLAY:
+            if first_note:
+                first_note = False
+            else:
+                if arg == RANDOM_ARG:
+                    note = randint(25, 35)
+                else:
+                    note += arg
+            # Should solve this better
+            if not (1 <= sample <= 31):
+                SP.print('Sample %d oob.', sample)
+                sample = randint(3, 10)
+            if not (0 <= note < 60):
+                SP.print('Note %d oob.', note)
+                note = randint(25, 35)
             yield build_cell(sample, note, 0, 0)
+            if duration is None:
+                SP.print('No duration, assuming 2.')
+                duration = 2
             for _ in range(duration - 1):
                 yield ZERO_CELL
         else:
@@ -180,9 +218,11 @@ def mycode_to_column(seq, sample, note):
 
 def mycode_to_rows(seq, col_defs):
     def pred(x):
-        return x == ('program', 0)
+        return x == (INSN_PROGRAM, 0)
     parts = [list(group) for k, group
              in groupby(seq, pred) if not k]
+    if not col_defs:
+        col_defs = [(None, None)] * len(parts)
     cols = [list(mycode_to_column(part, sample, note))
             for part, (sample, note) in zip(parts, col_defs)]
 
@@ -199,8 +239,8 @@ def mycode_to_rows(seq, col_defs):
 # Pretty printing (maybe not useful)
 ########################################################################
 def pretty_insn(ind, cmd, arg):
-    if cmd in ('jump', 'play', 'dur', 'sample', 'repeat'):
-        str = '%-8s %4d' % (cmd.upper(), arg)
+    if cmd in (INSN_JUMP, INSN_PLAY, INSN_DUR, INSN_SAMPLE, INSN_REPEAT):
+        str = '%-2s %4d' % (cmd.upper(), arg)
     else:
         str = cmd.upper()
     return ' ' * ind + str
@@ -208,10 +248,10 @@ def pretty_insn(ind, cmd, arg):
 def prettyprint_mycode(mycode):
     ind = 0
     for cmd, arg in mycode:
-        if cmd == 'end_block':
+        if cmd == INSN_END_BLOCK:
            ind -= 2
         print(pretty_insn(ind, cmd, arg))
-        if cmd == 'repeat':
+        if cmd == INSN_REPEAT:
             ind += 2
 
 ########################################################################
@@ -290,7 +330,7 @@ def analyze_mycode(mycode):
 
 ########################################################################
 
-if __name__ == '__main__':
+def main():
     from argparse import ArgumentParser, FileType
     parser = ArgumentParser(
         description = 'MyCode MOD analyzer')
@@ -315,9 +355,14 @@ if __name__ == '__main__':
         mod = load_file(args.module.name)
         rows = linearize_rows(mod)
         mycode = list(rows_to_mycode(rows))
-        check_mycode(rows, mycode)
+        print(rows_to_string(mycode_to_rows(mycode, None)))
+        # prettyprint_mycode(mycode)
+        # check_mycode(rows, mycode)
     elif args.corpus_path:
         corpus_path = Path(args.corpus_path)
         model_path = Path(args.model_path)
         mycode = get_sequence(corpus_path, model_path)
     analyze_mycode(mycode)
+
+if __name__ == '__main__':
+    main()
