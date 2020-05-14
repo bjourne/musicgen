@@ -259,10 +259,9 @@ def main():
         '--info', action = 'store_true',
         help = 'Print information')
 
-    subparser = parser.add_subparsers(dest = 'subparser')
-
+    subparser = parser.add_subparsers(dest = 'subparser', required = True)
     sync_index = subparser.add_parser('update-index')
-    group = sync_index.add_mutually_exclusive_group(required=True)
+    group = sync_index.add_mutually_exclusive_group(required = True)
     group.add_argument(
         '--genre-id', type = int,
         help = 'The Mod Archive genre id')
