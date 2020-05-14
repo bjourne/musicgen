@@ -4,7 +4,6 @@
 from collections import defaultdict
 from lxml import html
 from musicgen.utils import SP
-from pathlib import Path
 from requests import get
 from sys import exit
 from time import sleep
@@ -247,68 +246,3 @@ def download_mods(corpus_path, selected_format, max_size):
     SP.print('Over max size: %4d' % tally['size'])
     SP.print('Wrong format : %4d' % tally['format'])
     SP.leave()
-
-def main():
-    from argparse import ArgumentParser, FileType
-
-    parser = ArgumentParser(description = 'Bulk MOD downloader')
-    parser.add_argument(
-        '--corpus-path', required = True,
-        help = 'Path to corpus')
-    parser.add_argument(
-        '--info', action = 'store_true',
-        help = 'Print information')
-
-    subparser = parser.add_subparsers(dest = 'subparser', required = True)
-    sync_index = subparser.add_parser('update-index')
-    group = sync_index.add_mutually_exclusive_group(required = True)
-    group.add_argument(
-        '--genre-id', type = int,
-        help = 'The Mod Archive genre id')
-    group.add_argument(
-        '--module-id', type = int,
-        help = 'The Mod Archive module id')
-    group.add_argument(
-        '--random', type = int,
-        help = 'Random module from The Mod Archive')
-
-    download = subparser.add_parser('download')
-    download.add_argument(
-        '--max-size', type = int,
-        help = 'Only download mods smaller than specified size (in KB)')
-    formats = ['AHX', 'IT', 'MOD', 'S3M', 'XM']
-    download.add_argument(
-        '--format', choices = formats)
-
-    args = parser.parse_args()
-
-    SP.enabled = args.info
-    corpus_path = Path(args.corpus_path)
-    corpus_path.mkdir(parents = True, exist_ok = True)
-
-    cmd = args.subparser
-    if cmd == 'update-index':
-        genre_id = args.genre_id
-        module_id = args.module_id
-
-        index = load_index(corpus_path)
-        if genre_id is not None:
-            mods = modules_for_genre(genre_id)
-        elif module_id is not None:
-            mods = [IndexedModule.from_modarchive(module_id)]
-        elif args.random is not None:
-            mods = [IndexedModule.from_modarchive_random()
-                    for _ in range(args.random)]
-
-        SP.header('%d ENTRIES' % len(mods))
-        for mod in mods:
-            SP.print(short_line(mod))
-        SP.leave()
-        for mod in mods:
-            index[mod.id] = mod
-        save_index(corpus_path, index)
-    elif cmd == 'download':
-        download_mods(corpus_path, args.format, args.max_size)
-
-if __name__ == '__main__':
-    main()
