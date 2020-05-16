@@ -31,6 +31,7 @@ def main():
     download = subparser.add_parser('download')
     download.add_argument(
         '--max-size', type = int,
+        default = 150,
         help = 'Only download mods smaller than specified size (in KB)')
     formats = ['AHX', 'IT', 'MOD', 'S3M', 'XM']
     download.add_argument(
