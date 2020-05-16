@@ -268,6 +268,7 @@ def main():
                    n_orders = n_patterns,
                    restart_pos = 0,
                    pattern_table = bytearray(pattern_table),
+                   initials = 'M.K.'.encode('utf-8'),
                    patterns = patterns,
                    samples = mod.samples)
     save_file(args.output_module.name, mod_out)
