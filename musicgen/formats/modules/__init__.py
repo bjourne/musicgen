@@ -155,10 +155,15 @@ def linearize_rows(mod):
         table_idx += 1
     return rows
 
-def mod_note_volume(mod, cell):
+def mod_note_volume(default, cell):
     if cell.effect_cmd == 12:
         return (cell.effect_arg1 << 4) + cell.effect_arg2
-    return mod.sample_headers[cell.sample_idx - 1].volume
+    return default
+    #return mod.sample_headers[cell.sample_idx - 1].volume
+
+def volume_mapping(mod):
+    return {(s + 1) : header.volume
+            for (s, header) in enumerate(mod.sample_headers)}
 
 Note = namedtuple('Note', ['col_idx', 'row_idx',
                            'sample_idx', 'note_idx',
@@ -171,7 +176,7 @@ Note = namedtuple('Note', ['col_idx', 'row_idx',
 #
 # Worse : blu_angel_-_dream.mod
 # Better: agnostic.mod
-def notes_in_rows(mod, rows):
+def notes_in_rows(vol_mapping, rows):
     '''
     Order is (col, row, sample, note, vol, ms)
     '''
@@ -214,7 +219,7 @@ def notes_in_rows(mod, rows):
 
             note_idx = period_to_idx(period)
             assert 0 <= note_idx < 60
-            vol = mod_note_volume(mod, cell)
+            vol = mod_note_volume(vol_mapping[sample_idx], cell)
             yield Note(col_idx, row_idx,
                        sample_idx, note_idx,
                        vol, time_ms)

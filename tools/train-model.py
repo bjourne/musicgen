@@ -8,16 +8,18 @@ from keras.layers import (Activation, BatchNormalization, Dense, Dropout,
 from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
-from musicgen.formats.modules import row_to_string
-from musicgen.formats.modules.mycode import (get_sequence,
-                                             mycode_to_rows)
+from musicgen.formats.modules import notes_in_rows, row_to_string
+from musicgen.formats.modules.mod2midi import row_notes_to_midi_file
+from musicgen.formats.modules.mycode import (corpus_to_mycode,
+                                             mycode_to_rows,
+                                             INSN_PROGRAM)
 from musicgen.keras_utils import OneHotGenerator
 from musicgen.utils import SP
 from os import environ
 from pathlib import Path
 from pickle import dump, load
 from random import choice, randint, randrange
-from sys import argv
+from sys import argv, exit
 import numpy as np
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -40,9 +42,8 @@ def weighted_sample(probs, temperature):
     probas = np.random.multinomial(1, probs, 1)
     return np.argmax(probas)
 
-def generate_chars(model, seed, n_generate, temp, char2idx, idx2char):
+def generate_seq(model, seed, n_generate, temp, n_chars):
     seq_len = len(seed)
-    n_chars = len(char2idx)
     for _ in range(n_generate):
         X = np.zeros((1, seq_len, n_chars))
         for t, idx in enumerate(seed):
@@ -55,28 +56,54 @@ def generate_chars(model, seed, n_generate, temp, char2idx, idx2char):
         yield idx
         seed = seed[1:] + [idx]
 
+def generate_mycode(model, seed, n_generate, temp, char2idx, idx2char):
+    n_chars = len(char2idx)
+    seq = generate_seq(model, seed, n_generate, temp, n_chars)
+    mycode = [idx2char[i] for i in seq]
+    return mycode
+
+def mycode_to_midi_file(mycode, fname):
+    stop_tok = (INSN_PROGRAM, 0)
+    if stop_tok in mycode:
+        SP.print('Truncating multichannel data.')
+        mycode = mycode[:mycode.index(stop_tok)]
+
+    rows = mycode_to_rows(mycode, None)
+
+    for row in rows:
+        SP.print(row_to_string(row))
+
+    # Setup vol mapping
+    vol_mapping = {(s + 1) : 64 for s in range(31)}
+
+    # Extract mod notes and sort/groupby channel
+    notes = list(notes_in_rows(vol_mapping, rows))
+
+    conv_info = {(s + 1) : [1, 24, 2, 1.0] for s in range(31)}
+
+    row_notes_to_midi_file(notes, conv_info, vol_mapping, fname)
+
 def generate_music(model, n_epoch, seq, seq_len,
+                   model_path,
                    char2idx, idx2char):
     SP.header('EPOCH', '%d', n_epoch)
     idx = randrange(len(seq) - seq_len)
     seed = list(seq[idx:idx + seq_len])
     for temp in [None, 0.2, 0.5, 1.0, 1.2]:
         fmt = '%s' if temp is None else '%.2f'
-        SP.header('TEMPERATURE', fmt, temp)
-        mycode = [idx2char[i]
-                  for i in generate_chars(model, seed,
-                                          100, temp,
-                                          char2idx, idx2char)]
-        rows = mycode_to_rows(mycode, None)
-        #prettyprint_mycode(mycode)
-        # rows = sequence_to_rows(generated)
-        for row in rows:
-            SP.print(row_to_string(row))
+        temp_str = fmt % temp
+        SP.header('TEMPERATURE %s' % temp_str)
+        mycode = generate_mycode(model, seed, 200, temp,
+                                 char2idx, idx2char)
+
+        fname = 'gen-%03d-%s.mid' % (n_epoch, temp_str)
+        file_path = model_path / fname
+        mycode_to_midi_file(mycode, file_path)
         SP.leave()
     SP.leave()
 
-def run_training(corpus_path, model_path, win_size, step, batch_size):
-    seq = get_sequence(corpus_path, model_path)
+def run_training(corpus_path, win_size, step, batch_size):
+    seq = corpus_to_mycode(corpus_path, 150)
 
 
     # Different tokens in sequence
@@ -96,7 +123,7 @@ def run_training(corpus_path, model_path, win_size, step, batch_size):
 
     model = make_model(win_size, vocab_size)
 
-    weights_path = model_path / 'weights.hdf5'
+    weights_path = corpus_path / 'weights.hdf5'
     if weights_path.exists():
         SP.print(f'Loading existing weights from "{weights_path}".')
         model.load_weights(weights_path)
@@ -113,6 +140,7 @@ def run_training(corpus_path, model_path, win_size, step, batch_size):
 
     def on_epoch_begin(n_epoch, logs):
         generate_music(model, n_epoch, int_seq, win_size,
+                       corpus_path,
                        char2idx, idx2char)
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
 
@@ -130,9 +158,6 @@ def main_cmd_line():
         '--corpus-path', required = True,
         help = 'Path to corpus')
     parser.add_argument(
-        '--model-path', required = True,
-        help = 'Path to store model and cache.')
-    parser.add_argument(
         '--info', action = 'store_true',
         help = 'Print information')
     parser.add_argument(
@@ -142,13 +167,12 @@ def main_cmd_line():
     SP.enabled = args.info
 
     corpus_path = Path(args.corpus_path)
-    model_path = Path(args.model_path)
 
     # Should step be configurable too?
     win_size = args.win_size
     step = 1
 
-    run_training(corpus_path, model_path, win_size, step, 128)
+    run_training(corpus_path, win_size, step, 128)
 
 if __name__ == '__main__':
     main_cmd_line()

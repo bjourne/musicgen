@@ -1,7 +1,6 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # My coding! I should call this MODcode or something...
-from collections import Counter, defaultdict
 from construct import Container
 from itertools import groupby
 from musicgen.formats.modules import *
@@ -56,25 +55,30 @@ INSN_END_BLOCK = 'E'
 
 # 100 is a magic number and means the value is either random or
 # required to be inputted from the outside.
-RANDOM_ARG = 100
+INPUT_ARG = 100
 
 def get_sample_val(last_sample_idx, sample_idx):
     if last_sample_idx is None:
-        return RANDOM_ARG
+        return INPUT_ARG
     elif sample_idx != last_sample_idx:
-        sample_delta = sample_idx - last_sample_idx
-        if abs(sample_delta) > 15:
-            return RANDOM_ARG
-        return sample_delta
+        return sample_idx - last_sample_idx
     return None
 
 def get_play_val(last_note_idx, note_idx):
     if last_note_idx is None:
-        return RANDOM_ARG
-    note_delta = note_idx - last_note_idx
-    if abs(note_delta) > 24:
-        return RANDOM_ARG
-    return note_delta
+        return INPUT_ARG
+    return note_idx - last_note_idx
+
+def limit_argument(cmd, arg, max_note_delta, max_sample_delta):
+    if cmd == INSN_PLAY:
+        return cmd, INPUT_ARG if abs(arg) > max_note_delta else arg
+    elif cmd == INSN_SAMPLE:
+        return cmd, INPUT_ARG if abs(arg) > max_sample_delta else arg
+    return cmd, arg
+
+def limit_arguments(mycode, max_note_delta, max_sample_delta):
+    return [limit_argument(cmd, arg, max_note_delta, max_sample_delta)
+            for (cmd, arg) in mycode]
 
 def column_to_mycode(rows, col_idx):
     notes = list(column_to_notes(rows, col_idx))
@@ -118,8 +122,8 @@ def pack_mycode(mycode):
     intro = pack_mycode(mycode[:starti])
     loop = pack_mycode(mycode[starti:starti + width])
     outro = pack_mycode(mycode[starti + width * n_reps:])
-    return intro + [('repeat', n_reps)] + loop \
-        + [('end_block', 0)] + outro
+    return intro + [(INSN_REPEAT, n_reps)] + loop \
+        + [(INSN_END_BLOCK, 0)] + outro
 
 def rows_to_mycode(rows):
     for col_idx in range(4):
@@ -188,7 +192,7 @@ def mycode_to_column(seq, sample, note):
             if first_sample:
                 first_sample = False
             else:
-                if arg == RANDOM_ARG:
+                if arg == INPUT_ARG:
                     sample = randint(3, 10)
                 else:
                     sample += arg
@@ -196,7 +200,7 @@ def mycode_to_column(seq, sample, note):
             if first_note:
                 first_note = False
             else:
-                if arg == RANDOM_ARG:
+                if arg == INPUT_ARG:
                     note = randint(25, 35)
                 else:
                     note += arg
@@ -257,7 +261,7 @@ def prettyprint_mycode(mycode):
 ########################################################################
 # Cache generation
 ########################################################################
-def get_sequence_from_disk(corpus_path, mods):
+def disk_corpus_to_mycode(corpus_path, mods):
     SP.header('PARSING', '%d modules', len(mods))
     fnames = [corpus_path / mod.genre / mod.fname for mod in mods]
     seq = sum([list(mod_file_to_mycode(fname))
@@ -265,19 +269,18 @@ def get_sequence_from_disk(corpus_path, mods):
     SP.leave()
     return seq
 
-def get_sequence(corpus_path, model_path):
+def corpus_to_mycode(corpus_path, kb_limit):
     index = load_index(corpus_path)
     mods = [mod for mod in index.values()
             if (mod.n_channels == 4
                 and mod.format == 'MOD'
-                and mod.kb_size <= 150)]
+                and mod.kb_size <= kb_limit)]
 
-    key = sum(mod.kb_size for mod in mods)
-    cache_file = 'cache-064-%010d.pickle' % key
-    cache_path = model_path / cache_file
+    size_sum = sum(mod.kb_size for mod in mods)
+    cache_file = 'cache-%04d-%010d.pickle' % (kb_limit, size_sum)
+    cache_path = corpus_path / cache_file
     if not cache_path.exists():
-        model_path.mkdir(parents = True, exist_ok = True)
-        seq = get_sequence_from_disk(corpus_path, mods)
+        seq = disk_corpus_to_mycode(corpus_path, mods)
         SP.print('Saving cache...')
         with open(cache_path, 'wb') as f:
             dump(seq, f)
@@ -308,25 +311,6 @@ def check_mycode(rows1, mycode):
             if not cell1.sample_idx == cell2.sample_idx:
                 print('Diff at row %d' % row_idx)
             assert cell1.sample_idx == cell2.sample_idx
-
-def analyze_mycode(mycode):
-    from termtables import print as tt_print
-    from termtables.styles import markdown
-
-    code_counts = Counter(mycode)
-    total = sum(code_counts.values())
-
-    header = ['Command', 'Argument', 'Count', 'Freq.']
-    data = [(cmd, arg, v, '%.5f' % (v / total))
-            for ((cmd, arg), v) in code_counts.items()]
-    data = sorted(data)
-    tt_print(data,
-             padding = (0, 1),
-             alignment = 'lrrr',
-             style = markdown,
-             header = header)
-    print('%d tokens and %d token types.' %
-          (len(mycode), len(set(mycode))))
 
 ########################################################################
 

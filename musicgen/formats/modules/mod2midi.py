@@ -95,6 +95,31 @@ def generate_conv_info(mod, notes):
     return {sample : sample_props_to_conv(p)
             for (sample, p) in props}
 
+def row_notes_to_midi_file(notes, conv_info, vol_mapping, fname):
+    SP.header('MIDI MAPPING', '%d samples', len(conv_info))
+    SP.print('sample midi base dur vol')
+    fmt = '%6d %4d %4d %3d %3.1f'
+    for sample_idx, midi_def in conv_info.items():
+        SP.print(fmt, (sample_idx,) + tuple(midi_def))
+    SP.leave()
+
+    # Convert to midi notes
+    notes_per_channel = sort_groupby(notes, lambda n: n.col_idx)
+    notes_per_channel = [list(grp) for (_, grp) in notes_per_channel]
+
+    notes_per_channel = [list(midi_notes(conv_info, notes))
+                         for notes in notes_per_channel]
+    notes = sorted(sum(notes_per_channel, []))
+
+    note_groups = groupby(notes, lambda el: el[0])
+
+    midi = MidiFile(type = 1)
+    for i, (channel, note_group) in enumerate(note_groups):
+        track = list(midi_notes_to_track(channel, note_group))
+        track = MidiTrack(track)
+        midi.tracks.append(track)
+    midi.save(fname)
+
 def main():
     from argparse import ArgumentParser, FileType
 
@@ -126,11 +151,11 @@ def main():
         SP.print(row_to_string(row))
     SP.leave()
 
-    # Extract mod notes and sort/groupby channel
-    notes = list(notes_in_rows(mod, rows))
+    # Sample to volume mapping
+    vol_mapping = volume_mapping(mod)
 
-    notes_per_channel = sort_groupby(notes, lambda n: n.col_idx)
-    notes_per_channel = [list(grp) for (_, grp) in notes_per_channel]
+    # Extract mod notes and sort/groupby channel
+    notes = list(notes_in_rows(vol_mapping, rows))
 
     # Load or generate conversion
     if args.auto:
@@ -138,27 +163,7 @@ def main():
     else:
         conv_info = load(args.json)
         conv_info = {int(k) : v for (k, v) in conv_info.items()}
-
-    SP.header('MIDI MAPPING', '%d samples', len(conv_info))
-    SP.print('sample midi base dur vol')
-    fmt = '%6d %4d %4d %3d %3.1f'
-    for sample_idx, midi_def in conv_info.items():
-        SP.print(fmt, (sample_idx,) + tuple(midi_def))
-    SP.leave()
-
-    # Convert to midi notes
-    notes_per_channel = [list(midi_notes(conv_info, notes))
-                         for notes in notes_per_channel]
-    notes = sorted(sum(notes_per_channel, []))
-
-    note_groups = groupby(notes, lambda el: el[0])
-
-    midi = MidiFile(type = 1)
-    for i, (channel, note_group) in enumerate(note_groups):
-        track = list(midi_notes_to_track(channel, note_group))
-        track = MidiTrack(track)
-        midi.tracks.append(track)
-    midi.save(args.midi.name)
+    row_notes_to_midi_file(notes, conv_info, vol_mapping, args.midi.name)
 
 if __name__ == '__main__':
     main()
