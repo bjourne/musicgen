@@ -46,7 +46,6 @@ def play_sample_at_freq(sample, freq, volume):
 
     play_sample(arr)
 
-
 def main():
     parser = ArgumentParser(description = 'Sample synthesizer and player')
     parser.add_argument('module', type = FileType('rb'))
