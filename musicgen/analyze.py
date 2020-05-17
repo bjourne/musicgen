@@ -1,9 +1,8 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from collections import Counter, defaultdict, namedtuple
 from itertools import groupby
+from musicgen.defs import AMIGA_SAMPLE_RATE, BASE_FREQ, FREQS
 from musicgen.utils import sort_groupby
-from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import load_file
 
 HEADER = [
     'Sample',
@@ -141,6 +140,7 @@ def sample_props(mod, notes):
 
 def main():
     from argparse import ArgumentParser, FileType
+    from musicgen.parser import load_file
     from termtables import print as tt_print
     from termtables.styles import ascii_booktabs, booktabs
 

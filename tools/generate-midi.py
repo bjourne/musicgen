@@ -17,25 +17,23 @@ Options:
     --programs=<seq>       melodic and percussive programs
                            [default: 1,36:40,36,31]
 """
-
 from docopt import docopt
 from itertools import groupby, takewhile
 from json import load
-from musicgen.formats.modules import *
-from musicgen.formats.modules.analyze import sample_props
-from musicgen.formats.modules.generation import (mycode_to_midi_file,
-                                                 parse_programs)
-from musicgen.formats.modules.mycode import (INSN_DUR,
-                                             INSN_JUMP,
-                                             INSN_PLAY,
-                                             INSN_PROGRAM,
-                                             INSN_SAMPLE,
-                                             load_cache,
-                                             mycode_to_notes)
-from musicgen.formats.modules.parser import load_file
+from musicgen.analyze import sample_props
+from musicgen.generation import (assign_instruments,
+                                 mycode_to_midi_file,
+                                 notes_to_midi_file,
+                                 parse_programs)
+from musicgen.mycode import (INSN_JUMP,
+                             INSN_PROGRAM,
+                             load_cache,
+                             mycode_to_notes)
+from musicgen.parser import load_file
+from musicgen.rows import linearize_rows, rows_to_notes
 from musicgen.utils import SP, sort_groupby
 from pathlib import Path
-from random import choice, randrange
+from random import randrange
 
 def mod_file_to_midi_file(mod_file, midi_file,
                           midi_mapping, programs):

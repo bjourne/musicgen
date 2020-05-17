@@ -4,7 +4,7 @@
 from collections import namedtuple
 from itertools import groupby
 from mido import Message, MidiFile, MidiTrack
-from musicgen.formats.modules.mycode import mycode_to_notes
+from musicgen.mycode import mycode_to_notes
 from musicgen.utils import SP, sort_groupby
 
 Programs = namedtuple('Programs', ['melodic', 'percussive'])

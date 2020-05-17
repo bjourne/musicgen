@@ -3,8 +3,7 @@
 # Tool for converting stuff to mycode
 from argparse import ArgumentParser, FileType
 from collections import Counter
-from musicgen.formats.modules.mycode import (corpus_to_mycode,
-                                             mod_file_to_mycode)
+from musicgen.mycode import corpus_to_mycode, mod_file_to_mycode
 from musicgen.utils import SP
 from pathlib import Path
 from termtables import print as tt_print

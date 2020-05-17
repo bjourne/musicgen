@@ -1,11 +1,12 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
-# My coding! I should call this MODcode or something...
+# MyCode is a bad name for the internal data format I'm using.
 from construct import Container
 from itertools import groupby, takewhile
-from musicgen.formats.modules import *
-from musicgen.formats.modules.corpus import load_index
-from musicgen.formats.modules.parser import PowerPackerModule, load_file
+from musicgen.corpus import load_index
+from musicgen.defs import Note, period_to_idx
+from musicgen.parser import PowerPackerModule, load_file
+from musicgen.rows import linearize_rows
 from musicgen.utils import SP, find_best_split, find_best_split2
 from pathlib import Path
 from pickle import dump, load

@@ -3,7 +3,7 @@
 # I couldn't get the torrents working. Hence this tool.
 from argparse import ArgumentParser, FileType
 from pathlib import Path
-from musicgen.formats.modules.corpus import *
+from musicgen.corpus import *
 from musicgen.utils import SP
 
 def main():

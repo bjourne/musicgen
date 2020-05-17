@@ -20,9 +20,8 @@ from keras.layers import (Activation, BatchNormalization, Dense, Dropout,
 from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
-from musicgen.formats.modules import rows_to_notes, row_to_string
-from musicgen.formats.modules.generation import *
-from musicgen.formats.modules.mycode import *
+from musicgen.generation import *
+from musicgen.mycode import *
 from musicgen.keras_utils import OneHotGenerator
 from musicgen.utils import SP, sort_groupby
 from os import environ
