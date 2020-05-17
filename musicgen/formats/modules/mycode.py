@@ -167,6 +167,24 @@ def build_cell(sample, note, effect_cmd, effect_arg):
 
 ZERO_CELL = build_cell(0, -1, 0, 0)
 
+def mycode_to_notes(seq, note, sample, duration):
+    row = 0
+    for cmd, arg in seq:
+        assert arg != INPUT_ARG
+        if cmd == INSN_PLAY:
+            # No volume nor timing info in format
+            note += arg
+            yield Note(0, row, sample, note, 64, 100)
+            row += duration
+        elif cmd == INSN_SAMPLE:
+            sample += arg
+        elif cmd == INSN_DUR:
+            duration = arg
+        elif cmd == INSN_JUMP:
+            row += arg
+        else:
+            assert False
+
 # I have to work on this. OOB notes and samples and missing durations
 # should be handled better.
 def mycode_to_column(seq, sample, note):
@@ -269,6 +287,11 @@ def disk_corpus_to_mycode(corpus_path, mods):
     SP.leave()
     return seq
 
+def load_cache(cache_path):
+    assert cache_path.exists()
+    with open(cache_path, 'rb') as f:
+        return load(f)
+
 def corpus_to_mycode(corpus_path, kb_limit):
     index = load_index(corpus_path)
     mods = [mod for mod in index.values()
@@ -286,9 +309,7 @@ def corpus_to_mycode(corpus_path, kb_limit):
             dump(seq, f)
     else:
         SP.print('Using cache at %s.', cache_path)
-    assert cache_path.exists()
-    with open(cache_path, 'rb') as f:
-        return load(f)
+    return load_cache(cache_path)
 
 ########################################################################
 # Debugging and analysis

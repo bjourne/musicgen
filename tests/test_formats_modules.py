@@ -42,7 +42,8 @@ def test_loading_truncated_module():
 
 def percussive_samples(mod):
     rows = linearize_rows(mod)
-    notes = list(notes_in_rows(mod, rows))
+    volumes = [header.volume for header in mod.sample_headers]
+    notes = list(rows_to_notes(rows, volumes))
     return {sample for (sample, p) in sample_props(mod, notes)
             if p.is_percussive}
 
