@@ -29,7 +29,7 @@ def column_to_notes(rows, col_idx):
         yield row_idx, note_idx, sample_idx
 
 def produce_jumps(delta):
-    thresholds = [128, 64, 32, 16, 8, 4, 3, 2, 1]
+    thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
     for threshold in thresholds:
         while delta >= threshold:
             yield threshold
