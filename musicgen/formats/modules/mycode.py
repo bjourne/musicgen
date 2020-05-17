@@ -2,7 +2,7 @@
 #
 # My coding! I should call this MODcode or something...
 from construct import Container
-from itertools import groupby
+from itertools import groupby, takewhile
 from musicgen.formats.modules import *
 from musicgen.formats.modules.corpus import load_index
 from musicgen.formats.modules.parser import PowerPackerModule, load_file
@@ -167,13 +167,85 @@ def build_cell(sample, note, effect_cmd, effect_arg):
 
 ZERO_CELL = build_cell(0, -1, 0, 0)
 
-def mycode_to_notes(seq, note, sample, duration):
+########################################################################
+# Guessing logic
+########################################################################
+def find_subseq(seq, subseq):
+    l = len(subseq)
+    for i in range(len(seq) - l + 1):
+        if seq[i:i+l] == subseq:
+            yield i
+
+def guess_initial_duration(seq):
+    prefix = list(takewhile(lambda x: x[0] != INSN_DUR, seq))
+    if prefix == seq:
+        # No duration token in sequence so we pick the default one.
+        SP.print('No duration changes.')
+        return 2
+
+    play_in_prefix = any(x[0] == INSN_PLAY for x in prefix)
+    if not prefix or not play_in_prefix:
+        # Initial duration doesn't matter if there are no notes in the
+        # prefix.
+        SP.print('No play instructions in prefix.')
+        return 2
+
+    # Is the prefix present in another part of the sequence?
+    last_index = list(find_subseq(seq, prefix))[-1]
+    if last_index != 0:
+        # If so the last duration token before the last occurrence is
+        # the initial duration.
+        dur = [arg for (cmd, arg) in seq[:last_index]
+               if cmd == INSN_DUR][-1]
+        return dur
+
+    # Take the second duration if there is any. If there isn't
+    durs = [arg for (cmd, arg) in seq if cmd == INSN_DUR]
+    if len(durs) == 1:
+        return 2 if dur[0] == 1 else dur[0] - 1
+    return durs[1]
+
+def guess_initial_note(sample):
+    at_note = 0
+    min_note = 0
+    max_note = 0
+    for cmd, arg in sample:
+        if cmd == INSN_PLAY:
+            at_note += arg
+            max_note = max(at_note, max_note)
+            min_note = min(at_note, min_note)
+    return -min_note + 12
+
+def guess_initial_sample(seq):
+    at_sample = 0
+    min_sample = 0
+    max_sample = 0
+    for cmd, arg in seq:
+        if cmd == INSN_SAMPLE:
+            at_sample += arg
+            max_sample = max(at_sample, max_sample)
+            min_sample = min(at_sample, min_sample)
+    return -min_sample + 1
+
+def mycode_to_notes(seq):
+    print(seq)
+    # First make some educated guesses
+    note = guess_initial_note(seq)
+    sample = guess_initial_sample(seq)
+    duration = guess_initial_duration(seq)
+    assert duration is not None
+
+    SP.print('Guessed initial note %d, sample %d, and duration %d.',
+             (note, sample, duration))
+
     row = 0
     for cmd, arg in seq:
         assert arg != INPUT_ARG
         if cmd == INSN_PLAY:
-            # No volume nor timing info in format
             note += arg
+            if not 0 <= note < 60:
+                SP.print('Fixing bad note %d.', note)
+                note = note % 60
             yield Note(0, row, sample, note, 64, 100)
             row += duration
         elif cmd == INSN_SAMPLE:
