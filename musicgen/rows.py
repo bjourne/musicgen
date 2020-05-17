@@ -4,6 +4,7 @@ from musicgen.defs import (DEFAULT_SPEED, DEFAULT_TEMPO,
                            EFFECT_CMD_SET_VOLUME,
                            Note,
                            period_to_idx)
+from musicgen.utils import SP
 
 def linearize_rows(mod):
     table_idx = 0

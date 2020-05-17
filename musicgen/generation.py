@@ -62,6 +62,12 @@ def midi_notes(notes, midi_mapping):
             program = None
         else:
             midi_idx = midi_idx_base + note_idx
+
+            # In case the network generated garbate
+            if not 0 <= midi_idx < 128:
+                SP.print('Fixing midi note %d.', midi_idx)
+                midi_idx = min(max(midi_idx, 0), 127)
+
         velocity = int(min((vol / 64) * 127 * vol_adj, 127))
 
         note_on = offset_ms

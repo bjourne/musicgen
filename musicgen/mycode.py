@@ -233,9 +233,6 @@ def mycode_to_notes(seq):
         assert arg != INPUT_ARG
         if cmd == INSN_PLAY:
             note += arg
-            if not 0 <= note < 60:
-                SP.print('Fixing bad note %d.', note)
-                note = note % 60
             yield Note(0, row, sample, note, 64, 100)
             row += duration
         elif cmd == INSN_SAMPLE:

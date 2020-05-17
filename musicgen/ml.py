@@ -5,8 +5,14 @@ from keras.layers import (Activation, BatchNormalization, Dense, Dropout,
 from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
+from musicgen.generation import mycode_to_midi_file
 from musicgen.keras_utils import OneHotGenerator
-from musicgen.mycode import corpus_to_mycode
+from musicgen.mycode import (INSN_PROGRAM,
+                             INSN_PLAY,
+                             INSN_SAMPLE,
+                             INPUT_ARG,
+                             corpus_to_mycode)
+from musicgen.utils import SP
 from random import choice, randrange
 import numpy as np
 
