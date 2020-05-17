@@ -127,12 +127,3 @@ def save_file(fname, mod):
     cls = Module if len(samples) == 31 else ModuleSTK
     with open(fname, 'wb') as f:
         f.write(cls.build(mod))
-
-def main():
-    from sys import argv
-    from musicgen.formats.modules import pattern_to_string
-    mod = load_file(argv[1])
-    print(pattern_to_string(mod.patterns[0]))
-
-if __name__ == '__main__':
-    main()

@@ -1,8 +1,19 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-from argparse import ArgumentParser, FileType
-from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import load_file
-from os.path import basename, splitext
+"""MOD sample extractor
+
+Usage:
+    extract-samples.py [-v] <corpus/module>
+
+Options:
+    -h --help              show this screen
+    -v --verbose           print more output
+"""
+from docopt import docopt
+from musicgen.defs import SAMPLE_RATE
+from musicgen.parser import load_file
+from musicgen.samples import load_samples
+from musicgen.utils import SP
+from pathlib import Path
 from wave import open as wave_open
 import numpy as np
 
@@ -13,18 +24,25 @@ def write_sample(sample, fname):
         sfile.setsampwidth(2)
         sfile.writeframes(sample.arr.astype(np.int16))
 
-def main():
-    parser = ArgumentParser(
-        description = 'Extract samples from MOD files')
-    parser.add_argument('module', type = FileType('rb'))
-    args = parser.parse_args()
-    args.module.close()
-    mod = load_file(args.module.name)
+def extract_mod_file_samples(mod_file):
+    mod = load_file(mod_file)
     samples = load_samples(mod)
-    name_prefix = splitext(basename(args.module.name))[0]
+
+    name_prefix = mod_file.stem
     for idx, sample in enumerate(samples):
         fname = '%s-%02d.wav' % (name_prefix, idx + 1)
         write_sample(sample, fname)
+
+def main():
+    args = docopt(__doc__, version = 'MOD sample extractor 1.0')
+    SP.enabled = args['--verbose']
+
+    path = Path(args['<corpus/module>'])
+    if path.is_dir():
+        # Not implemented yet
+        pass
+    else:
+        extract_mod_file_samples(path)
 
 if __name__ == '__main__':
     main()
