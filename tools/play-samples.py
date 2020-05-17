@@ -1,7 +1,9 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from argparse import ArgumentParser, FileType
-from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import load_file
+from musicgen.defs import BASE_FREQ, FREQS, SAMPLE_RATE
+from musicgen.parser import load_file
+from musicgen.prettyprint import notestr_to_idx
+from musicgen.samples import load_samples, repeat_sample
 from pygame.mixer import (Channel, get_busy, init, pre_init,
                           set_num_channels)
 from pygame.sndarray import make_sound
@@ -66,7 +68,7 @@ def main():
     init_player(SAMPLE_RATE)
 
     sample_indices = [int(s) - 1 for s in args.samples.split(',')]
-    note_idx = notestr_to_index(args.period)
+    note_idx = notestr_to_idx(args.period)
     freq = FREQS[note_idx]
     for sample_idx in sample_indices:
         header = mod.sample_headers[sample_idx]

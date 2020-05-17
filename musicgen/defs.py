@@ -27,12 +27,6 @@ def period_to_idx(period):
     assert idx is not None
     return idx
 
-NOTES = [
-    "C-", "C#", "D-", "D#", "E-", "F-",
-    "F#", "G-", "G#", "A-", "A#", "B-"
-]
-NOTE_TO_IDX = {n : i for i, n in enumerate(NOTES)}
-
 NOTE_FREQS = [
     4186.01, 4434.92, 4698.63, 4978.03, 5274.04, 5587.65,
     5919.91, 6271.93, 6644.88, 7040.00, 7458.62, 7902.13
@@ -48,24 +42,14 @@ DEFAULT_VOLUME = 0x20
 TRACK_VOLUME = 0x20
 MASTER_VOLUME = 0x40
 
-def freq_for_index(idx):
+def freq_for_idx(idx):
     octave = idx // 12
     note = idx % 12
     return NOTE_FREQS[note]/2**(8-octave)
 
-def notestr_to_index(notestr):
-    note = NOTE_TO_IDX[notestr[:2]]
-    octave = int(notestr[2])
-    return 12 * octave + note
-
-def index_to_notestr(idx):
-    octave = idx // 12
-    note = idx % 12
-    return NOTES[note] + str(octave)
-
-FREQS = [freq_for_index(idx) for idx in range(len(PERIODS))]
-BASE_NOTE_IDX = notestr_to_index('C-3')
-BASE_FREQ = freq_for_index(BASE_NOTE_IDX)
+FREQS = [freq_for_idx(idx) for idx in range(len(PERIODS))]
+BASE_NOTE_IDX = 36
+BASE_FREQ = freq_for_idx(BASE_NOTE_IDX)
 
 # Enum for effect commands. Python's builtin Enum class doesn't play
 # well with Construct, hence why they are constants.

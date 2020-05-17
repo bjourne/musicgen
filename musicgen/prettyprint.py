@@ -1,4 +1,23 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+#
+# Prettyprint and pretty parse.
+from musicgen.defs import period_to_idx
+
+NOTES = [
+    "C-", "C#", "D-", "D#", "E-", "F-",
+    "F#", "G-", "G#", "A-", "A#", "B-"
+]
+NOTE_TO_IDX = {n : i for i, n in enumerate(NOTES)}
+
+def notestr_to_idx(notestr):
+    note = NOTE_TO_IDX[notestr[:2]]
+    octave = int(notestr[2])
+    return 12 * octave + note
+
+def idx_to_notestr(idx):
+    octave = idx // 12
+    note = idx % 12
+    return NOTES[note] + str(octave)
 
 def period_to_string(period):
     if period == 0:

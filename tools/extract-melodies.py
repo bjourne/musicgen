@@ -2,8 +2,11 @@
 from argparse import ArgumentParser, FileType
 from construct import Container
 from itertools import groupby
-from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import load_file, save_file
+from musicgen.defs import (DEFAULT_SPEED, DEFAULT_TEMPO, PERIODS,
+                           period_to_idx)
+from musicgen.parser import load_file, save_file
+from musicgen.prettyprint import cell_to_string
+from musicgen.rows import linearize_rows, update_timings
 from sys import exit
 
 def group_completion(buf, cell,

@@ -4,11 +4,16 @@
 """MyCode analyzer
 
 Usage:
-    analyze-mycode.py [-v] <corpus/module>
+    analyze-mycode.py [-v] [--max-note-delta=<int>]
+        [--max-sample-delta=<int>] [--kb-limit=<int>]
+        <corpus/module>
 
 Options:
-    -h --help              show this screen
-    -v --verbose           print more output
+    -h --help                   show this screen
+    -v --verbose                print more output
+    --max-note-delta=<int>      max allowed note change [default: 26]
+    --max-sample-delta=<int>    max allowed sample change [default: 22]
+    --kb-limit=<int>            kb limit [default: 150]
 """
 from docopt import docopt
 from collections import Counter
@@ -38,9 +43,14 @@ def main():
     args = docopt(__doc__, version = 'MyCode analyzer 1.0')
     SP.enabled = args['--verbose']
 
+    kb_limit = int(args['--kb-limit'])
+    max_note_delta = int(args['--max-note-delta'])
+    max_sample_delta = int(args['--max-sample-delta'])
+
     path = Path(args['<corpus/module>'])
     if path.is_dir():
-        mycode = corpus_to_mycode(path, 150)
+        mycode = corpus_to_mycode(path, kb_limit,
+                                  max_note_delta, max_sample_delta)
     else:
         mycode = mod_file_to_mycode(path)
     analyze_mycode(list(mycode))

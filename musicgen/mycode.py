@@ -70,17 +70,6 @@ def get_play_val(last_note_idx, note_idx):
         return INPUT_ARG
     return note_idx - last_note_idx
 
-def limit_argument(cmd, arg, max_note_delta, max_sample_delta):
-    if cmd == INSN_PLAY:
-        return cmd, INPUT_ARG if abs(arg) > max_note_delta else arg
-    elif cmd == INSN_SAMPLE:
-        return cmd, INPUT_ARG if abs(arg) > max_sample_delta else arg
-    return cmd, arg
-
-def limit_arguments(mycode, max_note_delta, max_sample_delta):
-    return [limit_argument(cmd, arg, max_note_delta, max_sample_delta)
-            for (cmd, arg) in mycode]
-
 def column_to_mycode(rows, col_idx):
     notes = list(column_to_notes(rows, col_idx))
 
@@ -365,18 +354,43 @@ def load_cache(cache_path):
     with open(cache_path, 'rb') as f:
         return load(f)
 
-def corpus_to_mycode(corpus_path, kb_limit):
+def limit_argument(cmd, arg, max_note_delta, max_sample_delta):
+    if cmd == INSN_PLAY:
+        return cmd, INPUT_ARG if abs(arg) > max_note_delta else arg
+    elif cmd == INSN_SAMPLE:
+        return cmd, INPUT_ARG if abs(arg) > max_sample_delta else arg
+    return cmd, arg
+
+def limit_arguments(seq, max_note_delta, max_sample_delta):
+    return [limit_argument(cmd, arg, max_note_delta, max_sample_delta)
+            for (cmd, arg) in seq]
+
+def cache_file_name(mods, kb_limit, max_note_delta, max_sample_delta):
+    size_sum = sum(mod.kb_size for mod in mods)
+    fmt = 'cache-%010d-%04d-%02d-%02d.pickle'
+    return fmt % (size_sum, kb_limit, max_note_delta, max_sample_delta)
+
+def corpus_to_mycode(corpus_path, kb_limit,
+                     max_note_delta, max_sample_delta):
     index = load_index(corpus_path)
     mods = [mod for mod in index.values()
             if (mod.n_channels == 4
                 and mod.format == 'MOD'
                 and mod.kb_size <= kb_limit)]
 
-    size_sum = sum(mod.kb_size for mod in mods)
-    cache_file = 'cache-%04d-%010d.pickle' % (kb_limit, size_sum)
+    cache_file = cache_file_name(mods, kb_limit,
+                                 max_note_delta, max_sample_delta)
+
+    # size_sum = sum(mod.kb_size for mod in mods)
+    # cache_file = 'cache-%04d-%010d.pickle' % (kb_limit, size_sum)
     cache_path = corpus_path / cache_file
     if not cache_path.exists():
         seq = disk_corpus_to_mycode(corpus_path, mods)
+
+        # Filter out uncommon tokens.
+        seq = limit_arguments(seq, 26, 20)
+
+
         SP.print('Saving cache...')
         with open(cache_path, 'wb') as f:
             dump(seq, f)

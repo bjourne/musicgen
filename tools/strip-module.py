@@ -1,8 +1,12 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 from argparse import ArgumentParser, FileType
 from musicgen.utils import StructuredPrinter, parse_comma_list
-from musicgen.formats.modules import *
-from musicgen.formats.modules.parser import load_file, save_file
+from musicgen.defs import (EFFECT_CMD_JUMP_TO_OFFSET,
+                           EFFECT_CMD_JUMP_TO_ROW,
+                           EFFECT_CMD_SET_VOLUME,
+                           EFFECT_CMD_UPDATE_TIMING)
+from musicgen.parser import load_file, save_file
+from musicgen.prettyprint import row_to_string
 
 def zero_effect(cell):
     cell.effect_cmd = 0
