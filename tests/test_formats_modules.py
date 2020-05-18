@@ -1,6 +1,9 @@
-from musicgen.formats.modules import *
-from musicgen.formats.modules.analyze import sample_props
-from musicgen.formats.modules.parser import load_file
+from musicgen.analyze import sample_props
+from musicgen.defs import PERIODS, period_to_idx
+from musicgen.parser import load_file
+from musicgen.prettyprint import rows_to_string
+from musicgen.rows import linearize_rows, rows_to_notes
+from musicgen.samples import load_samples
 from pathlib import Path
 
 TEST_PATH = Path() / 'tests' / 'mods'
