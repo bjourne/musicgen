@@ -20,63 +20,56 @@ def assign_instruments(samples, programs):
     mel_i = 0
     perc_i = 0
     midi_mapping = {}
-    for sample_idx, is_percussive in samples:
+    for sample_idx, is_percussive, duration in samples:
         if is_percussive:
             program = programs.percussive[perc_i]
             midi_mapping[sample_idx] = [-1, program, 4, 1.0]
             perc_i = (perc_i + 1) % len(programs.percussive)
         else:
             program, base = programs.melodic[mel_i]
-            midi_mapping[sample_idx] = [program, base, 4, 1.0]
+            midi_mapping[sample_idx] = [program, base, duration, 1.0]
             mel_i = (mel_i + 1) % len(programs.melodic)
     return midi_mapping
 
-def note_duration(notes, i, row_idx, note_dur):
-    if i < len(notes) - 1:
-        next_row_idx = notes[i + 1][1]
-        return min(next_row_idx - row_idx, note_dur)
-    return note_dur
-
-def midi_notes(notes, midi_mapping):
+def mod_notes_to_midi_notes(notes, midi_mapping):
     offset_ms = 0
     last_row_idx = 0
-    for i in range(len(notes)):
-        col_idx, row_idx, sample, note_idx, vol, row_time_ms = notes[i]
-        row_delta = row_idx - last_row_idx
+    for n in notes:
+        row_delta = n.row_idx - last_row_idx
 
         # Update time
-        offset_ms += row_delta * row_time_ms
-        last_row_idx = row_idx
+        offset_ms += row_delta * n.time_ms
+        last_row_idx = n.row_idx
 
-        program, midi_idx_base, note_dur, vol_adj = midi_mapping[sample]
-        note_dur = note_duration(notes, i, row_idx, note_dur)
+        program, midi_idx_base, note_dur, vol_adj \
+            = midi_mapping[n.sample_idx]
+
+        # Note duration is the minimum...
+        note_dur = min(note_dur, n.duration)
 
         # -2 indicates filtered notes.
         if program == -2:
             continue
 
-        # Drum track
-        if program == -1:
-            midi_idx = midi_idx_base
-            col_idx = 9
-            program = None
-        else:
-            midi_idx = midi_idx_base + note_idx
+        # Note velocity
+        velocity = int(min((n.vol / 64) * 127 * vol_adj, 127))
 
-            # In case the network generated garbate
-            if not 0 <= midi_idx < 128:
-                SP.print('Fixing midi note %d.', midi_idx)
-                midi_idx = min(max(midi_idx, 0), 127)
-
-        velocity = int(min((vol / 64) * 127 * vol_adj, 127))
-
+        # On and off offsets
         note_on = offset_ms
-        note_off = offset_ms + note_dur * row_time_ms
+        note_off = offset_ms + note_dur * n.time_ms
 
-        yield col_idx, note_on, 1, program, midi_idx, velocity
+        # Clamp the pitch in case the network generates garbage.
+        midi_idx = midi_idx_base + n.pitch_idx
+        if not 0 <= midi_idx < 120:
+            SP.print('Fixing midi note %d.', midi_idx)
+            midi_idx = min(max(midi_idx, 0), 120)
 
-        # We don't need note offs for drums but it doesn't hurt.
-        yield col_idx, note_off, 0, program, midi_idx, 0
+        # Drum track/melodic
+        if program == -1:
+            yield 9, note_on, 1, None, midi_idx_base, velocity
+        else:
+            yield n.col_idx, note_on, 1, program, midi_idx, velocity
+            yield n.col_idx, note_off, 0, program, midi_idx, 0
 
 def midi_notes_to_track(channel, notes):
     prev = 0
@@ -85,6 +78,7 @@ def midi_notes_to_track(channel, notes):
         rel_ofs = ofs - prev
         if program != current_program:
             current_program = program
+            assert program is not None
             yield Message('program_change', program = program,
                           time = rel_ofs,
                           channel = channel)
@@ -107,17 +101,19 @@ def midi_notes_to_track(channel, notes):
 def notes_to_midi_file(notes, midi_file, midi_mapping):
     SP.print('%d notes to convert.', len(notes))
     SP.header('MIDI MAPPING', '%d samples', len(midi_mapping))
-    SP.print('sample midi base dur vol')
-    fmt = '%6d %4d %4d %3d %3.1f'
+    SP.print('sample midi base dur  vol')
+    fmt = '%6d %4d %4d %3d %3.2f'
     for sample_idx, midi_def in midi_mapping.items():
         SP.print(fmt, (sample_idx,) + tuple(midi_def))
     SP.leave()
 
     notes_per_channel = sort_groupby(notes, lambda n: n.col_idx)
     notes_per_channel = [list(grp) for (_, grp) in notes_per_channel]
-    notes_per_channel = [list(midi_notes(notes, midi_mapping))
-                         for notes in notes_per_channel]
+    notes_per_channel = [
+        list(mod_notes_to_midi_notes(notes, midi_mapping))
+        for notes in notes_per_channel]
     notes = sorted(sum(notes_per_channel, []))
+    SP.print('Produced %d midi notes (on/offs).' % len(notes))
 
     # Group by column (9 for drums)
     note_groups = groupby(notes, lambda el: el[0])
@@ -134,6 +130,6 @@ def mycode_to_midi_file(seq, midi_file, programs):
 
     groups = [(n.sample_idx, n.note_idx) for n in notes]
     groups = sort_groupby(groups, lambda n: n[0])
-    samples = [(idx, len(set(grp)) == 1) for (idx, grp) in groups]
+    samples = [(idx, len(set(grp)) == 1, 4) for (idx, grp) in groups]
     midi_mapping = assign_instruments(samples, programs)
     notes_to_midi_file(notes, midi_file, midi_mapping)

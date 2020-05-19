@@ -30,7 +30,7 @@ from musicgen.mycode import (INSN_JUMP,
                              load_cache,
                              mycode_to_notes)
 from musicgen.parser import load_file
-from musicgen.rows import linearize_rows, rows_to_notes
+from musicgen.rows import linearize_rows, rows_to_mod_notes
 from musicgen.utils import SP, sort_groupby
 from pathlib import Path
 from random import randrange
@@ -43,12 +43,12 @@ def mod_file_to_midi_file(mod_file, midi_file,
     # Get volumes
     volumes = [header.volume for header in mod.sample_headers]
 
-    notes = list(rows_to_notes(rows, volumes))
+    notes = rows_to_mod_notes(rows, volumes)
 
     # Generate midi mapping if needed.
     if midi_mapping == 'auto':
         props = sample_props(mod, notes)
-        samples = [(sample_idx, props.is_percussive)
+        samples = [(sample_idx, props.is_percussive, props.note_duration)
                    for (sample_idx, props) in props]
         midi_mapping = assign_instruments(samples, programs)
 
@@ -65,8 +65,13 @@ def cache_file_to_midi_file(cache_file, midi_file,
 
             long_jump = any(arg >= 64 for (cmd, arg) in subseq
                            if cmd == INSN_JUMP)
-            if not (INSN_PROGRAM, 0) in subseq and not long_jump:
-                break
+            if long_jump:
+                SP.print('Long jump in seq.')
+                continue
+            if (INSN_PROGRAM, 0) in subseq:
+                SP.print('Program start in seq.')
+                continue
+            break
     else:
         code_index = int(code_index)
         subseq = seq[code_index:code_index + code_length]

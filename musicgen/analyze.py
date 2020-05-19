@@ -46,7 +46,7 @@ def bin_duration(dist):
             return thr
     return 1
 
-def get_sample_props(mod, sample, notes):
+def get_sample_props(mod, sample_idx, notes):
     # Get all piches
     pitches = [n.pitch_idx for n in notes]
 
@@ -57,7 +57,7 @@ def get_sample_props(mod, sample, notes):
     base_duration = max(durations)
 
     # Compute header size and repeat pct
-    header = mod.sample_headers[sample - 1]
+    header = mod.sample_headers[sample_idx - 1]
     size = header.size * 2
     if header.repeat_len > 2:
         repeat_pct = header.repeat_from / header.size
@@ -111,27 +111,20 @@ AnalyzeNote = namedtuple('AnalyzeNote', [
     'sample_idx', 'pitch_idx', 'row_duration', 'ringout_duration'])
 
 def notes_to_analyze_notes(samples, notes):
-    for col_idx, group in sort_groupby(notes, lambda n: n.col_idx):
-        last_row = None
-        for n in group:
-            assert 0 <= n.note_idx < 60
-            if last_row is None:
-                row_duration = 0
-            else:
-                row_duration = n.row_idx - last_row
-            assert row_duration >= 0
+    for n in notes:
+        assert 0 <= n.pitch_idx < 60
 
-            # Compute ringout duration
-            freq = FREQS[n.note_idx]
+        # Compute ringout duration
+        freq = FREQS[n.pitch_idx]
 
-            n_orig = len(samples[n.sample_idx - 1].bytes)
-            ringout_s = n_orig * BASE_FREQ / (freq * AMIGA_SAMPLE_RATE)
-            yield AnalyzeNote(n.sample_idx, n.note_idx,
-                              row_duration, ringout_s)
-            last_row = n.row_idx
+        n_orig = len(samples[n.sample_idx - 1].bytes)
+
+        # Should be in ms?
+        ringout_s = n_orig * BASE_FREQ / (freq * AMIGA_SAMPLE_RATE)
+        yield AnalyzeNote(n.sample_idx, n.pitch_idx, n.duration,
+                          ringout_s)
 
 def sample_props(mod, notes):
-
     analyze_notes = notes_to_analyze_notes(mod.samples, notes)
     grouped = sort_groupby(analyze_notes, lambda n: n.sample_idx)
     grouped = [(sample, get_sample_props(mod, sample, list(group)))

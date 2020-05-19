@@ -57,6 +57,21 @@ def mod_note_volume(default, cell):
         return (cell.effect_arg1 << 4) + cell.effect_arg2
     return default
 
+class ModNote:
+    def __init__(self, row_idx, col_idx, sample_idx, pitch_idx,
+                 vol, time_ms):
+        self.row_idx = row_idx
+        self.col_idx = col_idx
+        self.sample_idx = sample_idx
+        self.pitch_idx = pitch_idx
+        self.vol = vol
+        self.time_ms = time_ms
+        self.duration = None
+
+    def __str__(self):
+        return '%s<%d, %d>' % (self.__class__.__name__,
+                               self.row_idx, self.col_idx)
+
 # If the sample is present but not the period, it is ambiguous whether
 # the cell represents repeating the note or bending a ringing
 # note. For most but not all MODs, the MIDI representation becomes
@@ -64,49 +79,62 @@ def mod_note_volume(default, cell):
 #
 # Worse : blu_angel_-_dream.mod
 # Better: agnostic.mod
-def rows_to_notes(rows, volumes):
+def column_to_mod_notes(rows, col_idx, volumes):
     tempo = DEFAULT_TEMPO
     speed = DEFAULT_SPEED
-    channel_periods = {}
-    channel_samples = {}
+    col_period = None
+    col_sample_idx = None
+    notes = []
     for row_idx, row in enumerate(rows):
         tempo, speed = update_timings(row, tempo, speed)
         time_ms = int(calc_row_time(tempo, speed) * 1000)
-        for col_idx, cell in enumerate(row):
-            # Period may be missing.
-            sample_idx = cell.sample_idx
-            period = cell.period
-            # Neither sample nor note, skipping
-            if not sample_idx and not period:
+        cell = row[col_idx]
+
+        sample_idx = cell.sample_idx
+        period = cell.period
+        # Neither sample nor note, skipping
+        if not sample_idx and not period:
+            continue
+
+        # Corrupt mod with bad sample_idx
+        if not sample_idx <= 0x1f:
+            continue
+
+        # Sample but no note
+        if sample_idx and not period:
+            fmt = 'Missing period for sample %2d at cell %4d:%d.'
+            SP.print(fmt % (sample_idx, row_idx, col_idx))
+            continue
+
+        # Period but no sample
+        if period and not sample_idx:
+            sample_idx = col_sample_idx
+            if sample_idx is None:
+                fmt = 'Missing sample at cell %4d:%d and ' \
+                    + 'no channel sample. MOD bug?'
+                print(fmt % (row_idx, col_idx))
                 continue
+            fmt = 'Using last sample at cell %4d:%d'
+            SP.print(fmt % (row_idx, col_idx))
+            sample_idx = col_sample_idx
 
-            # Corrupt mod with bad sample_idx
-            if not sample_idx <= 0x1f:
-                continue
-
-            # Sample but no note
-            if sample_idx and not period:
-                fmt = 'Missing period for sample %2d at cell %4d:%d.'
-                SP.print(fmt % (sample_idx, row_idx, col_idx))
-                continue
-
-            # Period but no sample
-            if period and not sample_idx:
-                sample_idx = channel_samples.get(col_idx)
-                if sample_idx is None:
-                    fmt = 'Missing sample at cell %4d:%d and ' \
-                        + 'no channel sample. MOD bug?'
-                    print(fmt % (row_idx, col_idx))
-                    continue
-                fmt = 'Using last sample at cell %4d:%d'
-                SP.print(fmt % (row_idx, col_idx))
-                sample_idx = channel_samples[col_idx]
-
-            note_idx = period_to_idx(period)
-            assert 0 <= note_idx < 60
-            vol = mod_note_volume(volumes[sample_idx - 1], cell)
-            yield Note(col_idx, row_idx,
-                       sample_idx, note_idx,
+        pitch_idx = period_to_idx(period)
+        assert 0 <= pitch_idx < 60
+        vol = mod_note_volume(volumes[sample_idx - 1], cell)
+        note = ModNote(row_idx, col_idx,
+                       sample_idx, pitch_idx,
                        vol, time_ms)
-            channel_samples[col_idx] = sample_idx
-            channel_periods[col_idx] = period
+        notes.append(note)
+        col_period = period
+        col_sample_idx = sample_idx
+
+    # Add durations
+    for n1, n2 in zip(notes, notes[1:]):
+        n1.duration = n2.row_idx - n1.row_idx
+    if notes:
+        notes[-1].duration = len(rows) - notes[-1].row_idx
+    return notes
+
+def rows_to_mod_notes(rows, volumes):
+    return sum([column_to_mod_notes(rows, i, volumes)
+                for i in range(4)], [])

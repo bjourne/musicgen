@@ -6,7 +6,7 @@ from itertools import groupby, takewhile
 from musicgen.corpus import load_index
 from musicgen.defs import Note, period_to_idx
 from musicgen.parser import PowerPackerModule, load_file
-from musicgen.rows import linearize_rows
+from musicgen.rows import linearize_rows, column_to_mod_notes
 from musicgen.utils import SP, find_best_split, find_best_split2
 from pathlib import Path
 from pickle import dump, load
@@ -15,19 +15,6 @@ from random import randint
 ########################################################################
 # Native format to mycode
 ########################################################################
-def column_to_notes(rows, col_idx):
-    for row_idx, row in enumerate(rows):
-        cell = row[col_idx]
-        if not cell.period:
-            continue
-        note_idx = period_to_idx(cell.period)
-        sample_idx = cell.sample_idx
-        if not sample_idx <= 0x1f:
-            fmt = 'Skipping invalid sample %d in module.'
-            SP.print(fmt, sample_idx)
-            continue
-        yield row_idx, note_idx, sample_idx
-
 def produce_jumps(delta):
     thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
     for threshold in thresholds:
@@ -71,38 +58,34 @@ def get_play_val(last_note_idx, note_idx):
     return note_idx - last_note_idx
 
 def column_to_mycode(rows, col_idx):
-    notes = list(column_to_notes(rows, col_idx))
+    # Volumes are irrelevant
+    volumes = [64] * 32
+    notes = column_to_mod_notes(rows, col_idx, volumes)
 
-    # Add two dummy notes
-    notes = [(0, 0, 0)] + notes + [(len(rows), 0, 0)]
+    first_jump = notes[0].row_idx if notes else len(rows)
 
-    # Compute row deltas
-    notes = [(r2 - r1, n1, s1) for ((r1, n1, s1), (r2, n2, s2))
-             in zip(notes, notes[1:])]
-
-    # Maybe emit jumps
-    for jump in produce_jumps(notes[0][0]):
+    for jump in produce_jumps(first_jump):
         yield INSN_JUMP, jump
 
     last_duration = None
-    last_note_idx = None
     last_sample_idx = None
-    for row_delta, note_idx, sample_idx in notes[1:]:
-        duration, jump = duration_and_jump(last_duration, row_delta)
+    last_pitch_idx = None
+    for note in notes:
+        duration, jump = duration_and_jump(last_duration, note.duration)
         if duration != last_duration:
             yield INSN_DUR, duration
         last_duration = duration
 
-        sample_val = get_sample_val(last_sample_idx, sample_idx)
+        sample_val = get_sample_val(last_sample_idx, note.sample_idx)
         if sample_val is not None:
             yield INSN_SAMPLE, sample_val
 
-        play_val = get_play_val(last_note_idx, note_idx)
+        play_val = get_play_val(last_pitch_idx, note.pitch_idx)
         yield INSN_PLAY, play_val
         for jmp in produce_jumps(jump):
             yield INSN_JUMP, jmp
-        last_note_idx = note_idx
-        last_sample_idx = sample_idx
+        last_pitch_idx = note.pitch_idx
+        last_sample_idx = note.sample_idx
 
 def pack_mycode(mycode):
     starti, width, n_reps = find_best_split2(mycode)
@@ -192,7 +175,7 @@ def guess_initial_duration(seq):
     # Take the second duration if there is any. If there isn't
     durs = [arg for (cmd, arg) in seq if cmd == INSN_DUR]
     if len(durs) == 1:
-        return 2 if dur[0] == 1 else dur[0] - 1
+        return 2 if durs[0] == 1 else durs[0] - 1
     return durs[1]
 
 def guess_initial_note(sample):
@@ -338,7 +321,7 @@ def prettyprint_mycode(mycode):
 ########################################################################
 # Cache generation
 ########################################################################
-def disk_corpus_to_mycode(corpus_path, mods):
+def disk_corpus_to_mycode_cache(corpus_path, mods):
     SP.header('PARSING', '%d modules', len(mods))
     fnames = [corpus_path / mod.genre / mod.fname for mod in mods]
     seq = sum([list(mod_file_to_mycode(fname))
@@ -378,11 +361,9 @@ def corpus_to_mycode(corpus_path, kb_limit,
     cache_file = cache_file_name(mods, kb_limit,
                                  max_note_delta, max_sample_delta)
 
-    # size_sum = sum(mod.kb_size for mod in mods)
-    # cache_file = 'cache-%04d-%010d.pickle' % (kb_limit, size_sum)
     cache_path = corpus_path / cache_file
     if not cache_path.exists():
-        seq = disk_corpus_to_mycode(corpus_path, mods)
+        seq = disk_corpus_to_mycode_cache(corpus_path, mods)
 
         # Filter out uncommon tokens.
         seq = limit_arguments(seq, 26, 20)
@@ -416,42 +397,3 @@ def check_mycode(rows1, mycode):
             if not cell1.sample_idx == cell2.sample_idx:
                 print('Diff at row %d' % row_idx)
             assert cell1.sample_idx == cell2.sample_idx
-
-########################################################################
-
-def main():
-    from argparse import ArgumentParser, FileType
-    parser = ArgumentParser(
-        description = 'MyCode MOD analyzer')
-    parser.add_argument(
-        '--info', action = 'store_true',
-        help = 'Print information')
-    group = parser.add_mutually_exclusive_group(required = True)
-    group.add_argument(
-        '--module', type = FileType('rb'),
-        help = 'Path to module to analyze')
-    group.add_argument(
-        '--corpus-path',
-        help = 'Path to corpus')
-    parser.add_argument(
-        '--model-path',
-        help = 'Path to store model and cache.')
-    args = parser.parse_args()
-    SP.enabled = args.info
-
-    if args.module:
-        args.module.close()
-        mod = load_file(args.module.name)
-        rows = linearize_rows(mod)
-        mycode = list(rows_to_mycode(rows))
-        print(rows_to_string(mycode_to_rows(mycode, None)))
-        # prettyprint_mycode(mycode)
-        # check_mycode(rows, mycode)
-    elif args.corpus_path:
-        corpus_path = Path(args.corpus_path)
-        model_path = Path(args.model_path)
-        mycode = get_sequence(corpus_path, model_path)
-    analyze_mycode(mycode)
-
-if __name__ == '__main__':
-    main()

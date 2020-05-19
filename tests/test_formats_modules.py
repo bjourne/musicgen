@@ -2,7 +2,7 @@ from musicgen.analyze import sample_props
 from musicgen.defs import PERIODS, period_to_idx
 from musicgen.parser import load_file
 from musicgen.prettyprint import rows_to_string
-from musicgen.rows import linearize_rows, rows_to_notes
+from musicgen.rows import linearize_rows, rows_to_mod_notes
 from musicgen.samples import load_samples
 from pathlib import Path
 
@@ -46,7 +46,7 @@ def test_loading_truncated_module():
 def percussive_samples(mod):
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
-    notes = list(rows_to_notes(rows, volumes))
+    notes = list(rows_to_mod_notes(rows, volumes))
     return {sample for (sample, p) in sample_props(mod, notes)
             if p.is_percussive}
 

@@ -53,7 +53,8 @@ def main():
                                   max_note_delta, max_sample_delta)
     else:
         mycode = mod_file_to_mycode(path)
-    analyze_mycode(list(mycode))
+    mycode = list(mycode)
+    analyze_mycode(mycode)
 
 if __name__ == '__main__':
     main()
