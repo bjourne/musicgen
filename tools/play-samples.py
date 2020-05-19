@@ -90,6 +90,9 @@ def main():
         print(f'Repeat from: {repeat_from}')
         print(f'Repeat len : {repeat_len}')
 
+        if volume == 0:
+            volume = 64
+
         play_sample_at_freq(sample, freq, volume)
         sleep(0.5)
 
