@@ -13,21 +13,29 @@ def zero_effect(cell):
     cell.effect_arg1 = 0
     cell.effect_arg2 = 0
 
-def strip_cell(cell, channel_idx, sample_indices, channel_indices):
-    channel_is_filtered = channel_idx not in channel_indices
-    if cell.sample_idx not in sample_indices or channel_is_filtered:
-        cell.sample_hi = 0
-        cell.sample_lo = 0
-        cell.sample_idx = 0
-        cell.period = 0
+def strip_column(rows, col_idx, sample_indices, col_indices):
+    removed_col = col_idx not in col_indices
+    current_sample = None
+    for row in rows:
+        cell = row[col_idx]
+        if cell.sample_idx != 0:
+            current_sample = cell.sample_idx
+        removed_sample = current_sample not in sample_indices
+        if removed_col or removed_sample:
+            cell.sample_hi = 0
+            cell.sample_lo = 0
+            cell.sample_idx = 0
+            cell.period = 0
+        midi_compatible_commands = (EFFECT_CMD_JUMP_TO_OFFSET,
+                                    EFFECT_CMD_SET_VOLUME,
+                                    EFFECT_CMD_JUMP_TO_ROW,
+                                    EFFECT_CMD_UPDATE_TIMING)
+        if cell.effect_cmd not in midi_compatible_commands:
+            zero_effect(cell)
 
-    midi_compatible_commands = (EFFECT_CMD_JUMP_TO_OFFSET,
-                                EFFECT_CMD_SET_VOLUME,
-                                EFFECT_CMD_JUMP_TO_ROW,
-                                EFFECT_CMD_UPDATE_TIMING)
-    if (cell.effect_cmd not in midi_compatible_commands or
-        cell.effect_cmd == EFFECT_CMD_SET_VOLUME and channel_is_filtered):
-        zero_effect(cell)
+        if (cell.effect_cmd == EFFECT_CMD_SET_VOLUME
+            and (removed_sample or removed_col)):
+            zero_effect(cell)
 
 def update_pattern_table(mod, pattern_indices):
     new_patterns = []
@@ -44,7 +52,6 @@ def update_pattern_table(mod, pattern_indices):
     mod.n_orders = n_orders
     new_pattern_table += [0] * (128 - n_orders)
     mod.pattern_table = bytearray(new_pattern_table)
-
 
 def main():
     parser = ArgumentParser(description='Module stripper')
@@ -72,9 +79,9 @@ def main():
         sample_indices = parse_comma_list(args.samples)
 
     # Parse channel indices
-    channel_indices = [1, 2, 3, 4]
+    col_indices = list(range(4))
     if args.channels:
-        channel_indices = parse_comma_list(args.channels)
+        col_indices = [c - 1 for c in parse_comma_list(args.channels)]
 
     # Print pattern table
     pattern_table = [mod.pattern_table[i] for i in range(mod.n_orders)]
@@ -89,9 +96,8 @@ def main():
 
     # Strip effects
     for pattern in mod.patterns:
-        for row in pattern.rows:
-            for i, cell in enumerate(row):
-                strip_cell(cell, i + 1, sample_indices, channel_indices)
+        for i in range(4):
+            strip_column(pattern.rows, i, sample_indices, col_indices)
 
     sp.header('Output patterns')
     for idx, pattern in enumerate(mod.patterns):
