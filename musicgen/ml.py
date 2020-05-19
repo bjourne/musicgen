@@ -5,13 +5,10 @@ from keras.layers import (Activation, BatchNormalization, Dense, Dropout,
 from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
-from musicgen.generation import mycode_to_midi_file
 from musicgen.keras_utils import OneHotGenerator
-from musicgen.mycode import (INSN_PROGRAM,
-                             INSN_PLAY,
-                             INSN_SAMPLE,
-                             INPUT_ARG,
-                             corpus_to_mycode)
+from musicgen.generation import mycode_to_midi_file
+from musicgen.mycode import (INSN_PROGRAM, corpus_to_mycode,
+                             linearize_mycode_mods)
 from musicgen.utils import SP
 from random import choice, randrange
 import numpy as np
@@ -38,7 +35,7 @@ def weighted_sample(probs, temperature):
     probas = np.random.multinomial(1, probs, 1)
     return np.argmax(probas)
 
-def generate_seq(model, seed, n_generate, temp, n_chars, skip_chars):
+def generate_seq(model, seed, n_generate, temp, n_chars, skip_el):
     seq_len = len(seed)
     for _ in range(n_generate):
         X = np.zeros((1, seq_len, n_chars))
@@ -50,25 +47,21 @@ def generate_seq(model, seed, n_generate, temp, n_chars, skip_chars):
                 idx = np.random.choice(len(P), p = P)
             else:
                 idx = weighted_sample(P, temp)
-            if idx not in skip_chars:
+            if idx != skip_el:
                 break
         yield idx
         seed = seed[1:] + [idx]
 
 def generate_mycode(model, seed, n_generate, temp, char2idx, idx2char):
-    skip_chars = {(INSN_PROGRAM, 0),
-                  (INSN_PLAY, INPUT_ARG),
-                  (INSN_SAMPLE, INPUT_ARG)}
-    skip_chars = {char2idx[ch] for ch in skip_chars}
+    skip_el = char2idx[(INSN_PROGRAM, 0)]
     n_chars = len(char2idx)
-    seq = generate_seq(model, seed, n_generate, temp, n_chars, skip_chars)
+    seq = generate_seq(model, seed, n_generate, temp, n_chars, skip_el)
     mycode = [idx2char[i] for i in seq]
+    print(mycode)
     return mycode
 
-def generate_music(model, n_epoch, seq, seq_len,
-                   model_path,
-                   char2idx, idx2char,
-                   programs):
+def generate_music(model, n_epoch, seq, seq_len, model_path,
+                   char2idx, idx2char):
     SP.header('EPOCH', '%d', n_epoch)
     idx = randrange(len(seq) - seq_len)
     seed = list(seq[idx:idx + seq_len])
@@ -81,12 +74,14 @@ def generate_music(model, n_epoch, seq, seq_len,
 
         fname = 'gen-%03d-%s.mid' % (n_epoch, temp_str)
         file_path = model_path / fname
-        mycode_to_midi_file(mycode, file_path, programs)
+        mycode_to_midi_file(mycode, file_path, 120, None)
         SP.leave()
     SP.leave()
 
-def train_model(corpus_path, win_size, step, batch_size, programs):
-    seq = corpus_to_mycode(corpus_path, 150, 24, 20)
+def train_model(corpus_path, win_size, step, batch_size):
+    seq = corpus_to_mycode(corpus_path, 150)
+    seq = linearize_mycode_mods(seq)
+
 
     # Different tokens in sequence
     chars = sorted(set(seq))
@@ -123,8 +118,7 @@ def train_model(corpus_path, win_size, step, batch_size, programs):
     def on_epoch_begin(n_epoch, logs):
         generate_music(model, n_epoch, int_seq, win_size,
                        corpus_path,
-                       char2idx, idx2char,
-                       programs)
+                       char2idx, idx2char)
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
 
     callbacks = [cb_checkpoint, cb_generate]

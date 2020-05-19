@@ -4,6 +4,9 @@
 from collections import namedtuple
 from itertools import groupby
 from mido import Message, MidiFile, MidiTrack
+from musicgen.mycode import (guess_initial_duration,
+                             guess_initial_pitch,
+                             mycode_to_mod_notes)
 from musicgen.utils import SP, sort_groupby
 
 Programs = namedtuple('Programs', ['melodic', 'percussive'])
@@ -123,3 +126,15 @@ def notes_to_midi_file(notes, midi_file, midi_mapping):
         track = MidiTrack(track)
         midi.tracks.append(track)
     midi.save(midi_file)
+
+MYCODE_MIDI_MAPPING = {1 : [1, 36, 4, 1.0],
+                       2 : [-1, 40, 4, 1.0],
+                       3 : [-1, 36, 4, 1.0],
+                       4 : [-1, 31, 4, 1.0]}
+
+def mycode_to_midi_file(seq, midi_file, time_ms, pitch_idx):
+    if pitch_idx is None:
+        pitch_idx = guess_initial_pitch(seq)
+    dur = guess_initial_duration(seq)
+    notes = mycode_to_mod_notes(seq, 0, time_ms, pitch_idx, dur)
+    notes_to_midi_file(notes, midi_file, MYCODE_MIDI_MAPPING)

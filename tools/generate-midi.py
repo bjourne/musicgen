@@ -22,13 +22,13 @@ Options:
 from docopt import docopt
 from json import load
 from musicgen.analyze import sample_props
-from musicgen.generation import (assign_instruments,
+from musicgen.generation import (MYCODE_MIDI_MAPPING,
+                                 assign_instruments,
+                                 mycode_to_midi_file,
                                  notes_to_midi_file,
                                  parse_programs)
 from musicgen.mycode import (INSN_JUMP,
                              INSN_PROGRAM,
-                             guess_initial_duration,
-                             guess_initial_pitch,
                              load_cache,
                              mycode_to_mod_notes,
                              mod_file_to_mycode)
@@ -63,11 +63,7 @@ def mod_file_to_midi_file_using_mycode(mod_file, midi_file):
              for i, (pitch_idx, seq)
              in enumerate(mycode.cols)]
     notes = sum(notes, [])
-    midi_mapping = {1 : [1, 36, 4, 1.0],
-                    2 : [-1, 40, 4, 1.0],
-                    3 : [-1, 36, 4, 1.0],
-                    4 : [-1, 31, 4, 1.0]}
-    notes_to_midi_file(notes, midi_file, midi_mapping)
+    notes_to_midi_file(notes, midi_file, MYCODE_MIDI_MAPPING)
 
 def random_cache_location(mycode_mods, n_insns):
     long_jump_tok = (INSN_JUMP, 64)
@@ -104,18 +100,9 @@ def cache_file_to_midi_file(cache_file, midi_file,
     fmt = '%d instructions from "%s" %d:%d:%d.'
     SP.print(fmt, (n_insns, mycode_mod.name,
                    mod_idx, col_idx + 1, seq_idx))
-
     if guess:
-        pitch_idx = guess_initial_pitch(seq)
-        dur = guess_initial_duration(seq)
-
-    notes = mycode_to_mod_notes(seq, 0, mycode_mod.time_ms,
-                                pitch_idx, dur)
-    midi_mapping = {1 : [1, 36, 4, 1.0],
-                    2 : [-1, 40, 4, 1.0],
-                    3 : [-1, 36, 4, 1.0],
-                    4 : [-1, 31, 4, 1.0]}
-    notes_to_midi_file(notes, midi_file, midi_mapping)
+        pitch_idx = None
+    mycode_to_midi_file(seq, midi_file, mycode_mod.time_ms, pitch_idx)
 
 def main():
     args = docopt(__doc__, version = 'MIDI file generator 1.0')

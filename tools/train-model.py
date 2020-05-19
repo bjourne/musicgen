@@ -2,13 +2,12 @@
 """Model trainer
 
 Usage:
-    train-model.py [-v --programs=<seq>] --win-size=<int> <corpus-path>
+    train-model.py [-v --win-size=<int>] <corpus-path>
 
 Options:
     -h --help              show this screen
     -v --verbose           print more output
-    --programs=<seq>       melodic and percussive programs
-                           [default: 1,36:40,36,31]
+    --win-size=<int>       window size [default: 64]
 """
 from docopt import docopt
 from musicgen.generation import parse_programs
@@ -24,13 +23,12 @@ def main():
     SP.enabled = args['--verbose']
 
     corpus_path = Path(args['<corpus-path>'])
-    programs = parse_programs(args['--programs'])
 
     # Should step be configurable too?
     win_size = int(args['--win-size'])
     step = 1
 
-    train_model(corpus_path, win_size, 1, 128, programs)
+    train_model(corpus_path, win_size, 1, 128)
 
 if __name__ == '__main__':
     main()
