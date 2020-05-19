@@ -96,6 +96,11 @@ def column_to_mod_notes(rows, col_idx, volumes):
         if not sample_idx and not period:
             continue
 
+        if sample_idx:
+            col_sample_idx = sample_idx
+        if period:
+            col_period_idx = period
+
         # Corrupt mod with bad sample_idx
         if not sample_idx <= 0x1f:
             continue
@@ -114,9 +119,8 @@ def column_to_mod_notes(rows, col_idx, volumes):
                     + 'no channel sample. MOD bug?'
                 print(fmt % (row_idx, col_idx))
                 continue
-            fmt = 'Using last sample at cell %4d:%d'
-            SP.print(fmt % (row_idx, col_idx))
-            sample_idx = col_sample_idx
+            # fmt = 'Using last sample at cell %4d:%d'
+            # SP.print(fmt % (row_idx, col_idx))
 
         pitch_idx = period_to_idx(period)
         assert 0 <= pitch_idx < 60
@@ -125,8 +129,6 @@ def column_to_mod_notes(rows, col_idx, volumes):
                        sample_idx, pitch_idx,
                        vol, time_ms)
         notes.append(note)
-        col_period = period
-        col_sample_idx = sample_idx
 
     # Add durations
     for n1, n2 in zip(notes, notes[1:]):

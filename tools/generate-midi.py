@@ -3,35 +3,38 @@
 
 Usage:
     generate-midi.py [-hvo MIDI] [--programs=<seq>] module
-        [--midi-mapping=<json>] <mod>
+        [--midi-mapping=<json> --use-mycode] <mod>
     generate-midi.py [-hvo MIDI] [--programs=<seq>] cache
-        [--length=<len> --index=<index>] <cache>
+        [--length=<len> --location=<index> --guess] <cache>
 
 Options:
     -h --help              show this screen
     -v --verbose           print more output
     -o FILE --output FILE  output file [default: test.mid]
     --midi-mapping=<json>  instrument mapping [default: auto]
+    --use-mycode           use the mycode intermediate format
+    --guess                guess initial pitch and duration
     --length=<len>         length of code to sample [default: 100]
-    --index=<index>        index in cache file [default: random]
+    --location=<index>     location in cache file [default: random]
     --programs=<seq>       melodic and percussive programs
                            [default: 1,36:40,36,31]
 """
 from docopt import docopt
-from itertools import groupby, takewhile
 from json import load
 from musicgen.analyze import sample_props
 from musicgen.generation import (assign_instruments,
-                                 mycode_to_midi_file,
                                  notes_to_midi_file,
                                  parse_programs)
 from musicgen.mycode import (INSN_JUMP,
                              INSN_PROGRAM,
+                             guess_initial_duration,
+                             guess_initial_pitch,
                              load_cache,
-                             mycode_to_notes)
+                             mycode_to_mod_notes,
+                             mod_file_to_mycode)
 from musicgen.parser import load_file
 from musicgen.rows import linearize_rows, rows_to_mod_notes
-from musicgen.utils import SP, sort_groupby
+from musicgen.utils import SP
 from pathlib import Path
 from random import randrange
 
@@ -42,7 +45,6 @@ def mod_file_to_midi_file(mod_file, midi_file,
 
     # Get volumes
     volumes = [header.volume for header in mod.sample_headers]
-
     notes = rows_to_mod_notes(rows, volumes)
 
     # Generate midi mapping if needed.
@@ -54,55 +56,96 @@ def mod_file_to_midi_file(mod_file, midi_file,
 
     notes_to_midi_file(notes, midi_file, midi_mapping)
 
+def mod_file_to_midi_file_using_mycode(mod_file, midi_file):
+    mycode = mod_file_to_mycode(mod_file)
+    time_ms = mycode.time_ms
+    notes = [mycode_to_mod_notes(seq, i, time_ms, pitch_idx, None)
+             for i, (pitch_idx, seq)
+             in enumerate(mycode.cols)]
+    notes = sum(notes, [])
+    midi_mapping = {1 : [1, 36, 4, 1.0],
+                    2 : [-1, 40, 4, 1.0],
+                    3 : [-1, 36, 4, 1.0],
+                    4 : [-1, 31, 4, 1.0]}
+    notes_to_midi_file(notes, midi_file, midi_mapping)
+
+def random_cache_location(mycode_mods, n_insns):
+    long_jump_tok = (INSN_JUMP, 64)
+    while True:
+        i = randrange(len(mycode_mods))
+        mycode_mod = mycode_mods[i]
+        j = randrange(4)
+        _, col = mycode_mod.cols[j]
+        n = len(col)
+        if n - n_insns <= 0:
+            SP.print('Only %d instructions in column.', n_col)
+            continue
+        k = randrange(n - n_insns)
+        if not long_jump_tok in col[k:k + n_insns]:
+            return i, j, k
+
 def cache_file_to_midi_file(cache_file, midi_file,
-                            code_index, code_length,
-                            programs):
-    seq = load_cache(cache_file)
-    if code_index == 'random':
-        while True:
-            code_index = randrange(len(seq) - code_length)
-            subseq = seq[code_index:code_index + code_length]
-
-            long_jump = any(arg >= 64 for (cmd, arg) in subseq
-                           if cmd == INSN_JUMP)
-            if long_jump:
-                SP.print('Long jump in seq.')
-                continue
-            if (INSN_PROGRAM, 0) in subseq:
-                SP.print('Program start in seq.')
-                continue
-            break
+                            loc, n_insns,
+                            programs,
+                            guess):
+    mycode_mods = load_cache(cache_file)
+    long_jump_tok = (INSN_JUMP, 64)
+    if loc == 'random':
+        mod_idx, col_idx, seq_idx = random_cache_location(mycode_mods,
+                                                          n_insns)
     else:
-        code_index = int(code_index)
-        subseq = seq[code_index:code_index + code_length]
-    SP.print('Selected index %d from cache of length %d.',
-             (code_index, len(seq)))
+        mod_idx, col_idx, seq_idx = [int(i) for i in loc.split(':')]
+        col_idx -= 1
 
-    mycode_to_midi_file(subseq, midi_file, programs)
+    mycode_mod = mycode_mods[mod_idx]
+    pitch_idx, seq = mycode_mod.cols[col_idx]
+    seq = seq[seq_idx:seq_idx + n_insns]
+
+    fmt = '%d instructions from "%s" %d:%d:%d.'
+    SP.print(fmt, (n_insns, mycode_mod.name,
+                   mod_idx, col_idx + 1, seq_idx))
+
+    if guess:
+        pitch_idx = guess_initial_pitch(seq)
+        dur = guess_initial_duration(seq)
+
+    notes = mycode_to_mod_notes(seq, 0, mycode_mod.time_ms,
+                                pitch_idx, dur)
+    midi_mapping = {1 : [1, 36, 4, 1.0],
+                    2 : [-1, 40, 4, 1.0],
+                    3 : [-1, 36, 4, 1.0],
+                    4 : [-1, 31, 4, 1.0]}
+    notes_to_midi_file(notes, midi_file, midi_mapping)
 
 def main():
     args = docopt(__doc__, version = 'MIDI file generator 1.0')
     SP.enabled = args['--verbose']
 
     mod_file = args['<mod>']
+    mod_file = Path(mod_file) if mod_file else None
+
     cache_file = args['<cache>']
     midi_file = args['--output']
     programs = parse_programs(args['--programs'])
     if mod_file:
-        midi_mapping = args['--midi-mapping']
-        if midi_mapping != 'auto':
-            with open(midi_mapping, 'r') as f:
-                midi_mapping = load(f)
-            midi_mapping = {int(k) : v for (k, v) in midi_mapping.items()}
-        mod_file_to_midi_file(mod_file, midi_file,
-                              midi_mapping, programs)
+        if args['--use-mycode']:
+            mod_file_to_midi_file_using_mycode(mod_file, midi_file)
+        else:
+            midi_mapping = args['--midi-mapping']
+            if midi_mapping != 'auto':
+                with open(midi_mapping, 'r') as f:
+                    midi_mapping = load(f)
+                midi_mapping = {int(k) : v
+                                for (k, v) in midi_mapping.items()}
+            mod_file_to_midi_file(mod_file, midi_file,
+                                  midi_mapping, programs)
     elif cache_file:
         cache_file = Path(cache_file)
-        code_length = int(args['--length'])
-        code_index = args['--index']
+        n_insns = int(args['--length'])
+        location = args['--location']
         cache_file_to_midi_file(cache_file, midi_file,
-                                code_index, code_length,
-                                programs)
+                                location, n_insns,
+                                programs, args['--guess'])
 
 if __name__ == '__main__':
     main()

@@ -1,20 +1,16 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # MyCode is a bad name for the internal data format I'm using.
+# from collections import namedtuple
 from construct import Container
 from itertools import groupby, takewhile
+from musicgen.analyze import sample_props
 from musicgen.corpus import load_index
-from musicgen.defs import Note, period_to_idx
 from musicgen.parser import PowerPackerModule, load_file
-from musicgen.rows import linearize_rows, column_to_mod_notes
-from musicgen.utils import SP, find_best_split, find_best_split2
-from pathlib import Path
+from musicgen.rows import ModNote, linearize_rows, column_to_mod_notes
+from musicgen.utils import SP
 from pickle import dump, load
-from random import randint
 
-########################################################################
-# Native format to mycode
-########################################################################
 def produce_jumps(delta):
     thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
     for threshold in thresholds:
@@ -22,6 +18,16 @@ def produce_jumps(delta):
             yield threshold
             delta -= threshold
     assert delta == 0
+
+def produce_pitches(delta):
+    while delta >= 12:
+        yield 12
+        delta -= 12
+    while delta <= -12:
+        yield -12
+        delta += 12
+    if delta != 0:
+        yield delta
 
 def duration_and_jump(duration, row_delta):
     if duration is None:
@@ -36,109 +42,115 @@ def duration_and_jump(duration, row_delta):
 INSN_JUMP = 'J'
 INSN_DUR = 'D'
 INSN_PLAY = 'P'
-INSN_SAMPLE = 'S'
 INSN_PROGRAM = 'X'
-INSN_REPEAT = 'R'
-INSN_END_BLOCK = 'E'
+INSN_PITCH = 'I'
 
-# 100 is a magic number and means the value is either random or
-# required to be inputted from the outside.
-INPUT_ARG = 100
+def mod_notes_to_mycode(notes, instruments, n_rows):
+    seq = []
 
-def get_sample_val(last_sample_idx, sample_idx):
-    if last_sample_idx is None:
-        return INPUT_ARG
-    elif sample_idx != last_sample_idx:
-        return sample_idx - last_sample_idx
-    return None
-
-def get_play_val(last_note_idx, note_idx):
-    if last_note_idx is None:
-        return INPUT_ARG
-    return note_idx - last_note_idx
-
-def column_to_mycode(rows, col_idx):
-    # Volumes are irrelevant
-    volumes = [64] * 32
-    notes = column_to_mod_notes(rows, col_idx, volumes)
-
-    first_jump = notes[0].row_idx if notes else len(rows)
-
+    first_jump = notes[0].row_idx if notes else n_rows
     for jump in produce_jumps(first_jump):
-        yield INSN_JUMP, jump
+        seq.append((INSN_JUMP, jump))
 
     last_duration = None
-    last_sample_idx = None
     last_pitch_idx = None
+    first_pitch = None
     for note in notes:
+        # Maybe update duration
         duration, jump = duration_and_jump(last_duration, note.duration)
         if duration != last_duration:
-            yield INSN_DUR, duration
+            seq.append((INSN_DUR, duration))
         last_duration = duration
 
-        sample_val = get_sample_val(last_sample_idx, note.sample_idx)
-        if sample_val is not None:
-            yield INSN_SAMPLE, sample_val
+        instrument = instruments[note.sample_idx]
 
-        play_val = get_play_val(last_pitch_idx, note.pitch_idx)
-        yield INSN_PLAY, play_val
-        for jmp in produce_jumps(jump):
-            yield INSN_JUMP, jmp
-        last_pitch_idx = note.pitch_idx
-        last_sample_idx = note.sample_idx
+        if instrument == 1:
+            if last_pitch_idx is None:
+                first_pitch = note.pitch_idx
+            else:
+                pitch_delta = note.pitch_idx - last_pitch_idx
+                for pitch in produce_pitches(pitch_delta):
+                    seq.append((INSN_PITCH, pitch))
+            last_pitch_idx = note.pitch_idx
+        seq.append((INSN_PLAY, instrument))
+        for jump in produce_jumps(jump):
+            seq.append((INSN_JUMP, jump))
+    return first_pitch, seq
 
-def pack_mycode(mycode):
-    starti, width, n_reps = find_best_split2(mycode)
-    if n_reps == 1:
-        return mycode
-    SP.print('Packing code of length %d.', len(mycode))
-    intro = pack_mycode(mycode[:starti])
-    loop = pack_mycode(mycode[starti:starti + width])
-    outro = pack_mycode(mycode[starti + width * n_reps:])
-    return intro + [(INSN_REPEAT, n_reps)] + loop \
-        + [(INSN_END_BLOCK, 0)] + outro
+def mycode_to_mod_notes(seq, col_idx, time_ms, pitch_idx, dur):
+    row_idx = 0
+    notes = []
+    for cmd, arg in seq:
+        if cmd == INSN_JUMP:
+            row_idx += arg
+        elif cmd == INSN_DUR:
+            dur = arg
+        elif cmd == INSN_PITCH:
+            pitch_idx += arg
+        elif cmd == INSN_PLAY:
+            pitch_to_use = 0
+            if arg == 1:
+                assert pitch_idx is not None
+                pitch_to_use = pitch_idx
+            notes.append(ModNote(row_idx, col_idx,
+                                 arg, pitch_to_use, 64, time_ms))
+            row_idx += dur
+        else:
+            assert False
+    # Add durations
+    for n1, n2 in zip(notes, notes[1:]):
+        n1.duration = n2.row_idx - n1.row_idx
+    if notes:
+        assert dur is not None
+        notes[-1].duration = dur
+    return notes
 
-def rows_to_mycode(rows):
-    for col_idx in range(4):
-        mycode = list(column_to_mycode(rows, col_idx))
-        # Still to slow.
-        # mycode = pack_mycode(mycode)
-        for ev in mycode:
-            yield ev
-        yield INSN_PROGRAM, 0
+class MyCodedModule:
+    def __init__(self, name, time_ms, cols):
+        self.name = name
+        self.time_ms = time_ms
+        self.cols = cols
 
-def mod_file_to_mycode(fname):
-    SP.print(str(fname))
-    try:
-        mod = load_file(fname)
-    except PowerPackerModule:
-        SP.print('Skipping PP20 module.')
-        return []
+    def linearize(self):
+        start_tok = (INSN_PROGRAM, 0)
+        seq = []
+        for first_pitch, insns in self.cols:
+            seq.append(start_tok)
+            seq.extend(insns)
+        return seq
+
+def mod_file_to_mycode(file_path):
+    SP.print(str(file_path))
+    mod = load_file(file_path)
     rows = linearize_rows(mod)
-    return rows_to_mycode(rows)
 
-########################################################################
-# Mycode to native format
-########################################################################
-def build_cell(sample, note, effect_cmd, effect_arg):
-    if note == -1:
-        period = 0
-    else:
-        period = PERIODS[note]
-    sample_lo = sample & 0xf
-    sample_hi = sample >> 4
-    sample_idx = (sample_hi << 4) + sample_lo
-    effect_arg1 = effect_arg >> 4
-    effect_arg2 = effect_arg & 0xf
-    return Container(dict(period = period,
-                          sample_lo = sample_lo,
-                          sample_hi = sample_hi,
-                          sample_idx = sample_idx,
-                          effect_cmd = effect_cmd,
-                          effect_arg1 = effect_arg1,
-                          effect_arg2 = effect_arg2))
+    # Map samples to their instruments (1..4)
+    volumes = [64] * 32
 
-ZERO_CELL = build_cell(0, -1, 0, 0)
+    col_notes = [column_to_mod_notes(rows, i, volumes) for i in range(4)]
+    all_notes = sum(col_notes, [])
+
+    instruments = {}
+    n_perc = 0
+    for sample_idx, props in sample_props(mod, all_notes):
+        if not props.is_percussive:
+            instruments[sample_idx] = 1
+        else:
+            instruments[sample_idx] = 2 + n_perc
+            n_perc = (n_perc + 1) % 3
+
+    time_ms = all_notes[0].time_ms
+    n_rows = len(rows)
+    cols = [mod_notes_to_mycode(notes, instruments, n_rows)
+            for notes in col_notes]
+    return MyCodedModule(file_path.name, time_ms, cols)
+
+def linearize_mycode_mods(data):
+    SP.print('Linearizing %d entries.' % len(data))
+    seq = []
+    for mycode_mod in data:
+        seq.extend(mycode_mod.linearize())
+    return seq
 
 ########################################################################
 # Guessing logic
@@ -156,8 +168,7 @@ def guess_initial_duration(seq):
         SP.print('No duration changes.')
         return 2
 
-    play_in_prefix = any(x[0] == INSN_PLAY for x in prefix)
-    if not prefix or not play_in_prefix:
+    if not prefix or not (INSN_PLAY, 1) in prefix:
         # Initial duration doesn't matter if there are no notes in the
         # prefix.
         SP.print('No play instructions in prefix.')
@@ -178,154 +189,32 @@ def guess_initial_duration(seq):
         return 2 if durs[0] == 1 else durs[0] - 1
     return durs[1]
 
-def guess_initial_note(sample):
+def guess_initial_pitch(seq):
     at_note = 0
     min_note = 0
     max_note = 0
-    for cmd, arg in sample:
-        if cmd == INSN_PLAY:
+    for cmd, arg in seq:
+        if cmd == INSN_PITCH:
             at_note += arg
             max_note = max(at_note, max_note)
             min_note = min(at_note, min_note)
     return -min_note + 12
 
-def guess_initial_sample(seq):
-    at_sample = 0
-    min_sample = 0
-    max_sample = 0
-    for cmd, arg in seq:
-        if cmd == INSN_SAMPLE:
-            at_sample += arg
-            max_sample = max(at_sample, max_sample)
-            min_sample = min(at_sample, min_sample)
-    return -min_sample + 1
-
-def mycode_to_notes(seq):
-    print(seq)
-    # First make some educated guesses
-    note = guess_initial_note(seq)
-    sample = guess_initial_sample(seq)
-    duration = guess_initial_duration(seq)
-    assert duration is not None
-
-    SP.print('Guessed initial note %d, sample %d, and duration %d.',
-             (note, sample, duration))
-
-    row = 0
-    for cmd, arg in seq:
-        assert arg != INPUT_ARG
-        if cmd == INSN_PLAY:
-            note += arg
-            yield Note(0, row, sample, note, 64, 100)
-            row += duration
-        elif cmd == INSN_SAMPLE:
-            sample += arg
-        elif cmd == INSN_DUR:
-            duration = arg
-        elif cmd == INSN_JUMP:
-            row += arg
-        else:
-            assert False
-
-# I have to work on this. OOB notes and samples and missing durations
-# should be handled better.
-def mycode_to_column(seq, sample, note):
-    row_idx = 0
-    col = []
-
-    duration = None
-    first_note = True
-    first_sample = True
-
-    if sample is None:
-        sample = randint(3, 10)
-    if note is None:
-        note = randint(27, 30)
-
-    for cmd, arg in seq:
-        if cmd == INSN_JUMP:
-            for _ in range(arg):
-                yield ZERO_CELL
-        elif cmd == INSN_DUR:
-            duration = arg
-        elif cmd == INSN_SAMPLE:
-            if first_sample:
-                first_sample = False
-            else:
-                if arg == INPUT_ARG:
-                    sample = randint(3, 10)
-                else:
-                    sample += arg
-        elif cmd == INSN_PLAY:
-            if first_note:
-                first_note = False
-            else:
-                if arg == INPUT_ARG:
-                    note = randint(25, 35)
-                else:
-                    note += arg
-            # Should solve this better
-            if not (1 <= sample <= 31):
-                SP.print('Sample %d oob.', sample)
-                sample = randint(3, 10)
-            if not (0 <= note < 60):
-                SP.print('Note %d oob.', note)
-                note = randint(25, 35)
-            yield build_cell(sample, note, 0, 0)
-            if duration is None:
-                SP.print('No duration, assuming 2.')
-                duration = 2
-            for _ in range(duration - 1):
-                yield ZERO_CELL
-        else:
-            assert False
-
-def mycode_to_rows(seq, col_defs):
-    def pred(x):
-        return x == (INSN_PROGRAM, 0)
-    parts = [list(group) for k, group
-             in groupby(seq, pred) if not k]
-    if not col_defs:
-        col_defs = [(None, None)] * len(parts)
-    cols = [list(mycode_to_column(part, sample, note))
-            for part, (sample, note) in zip(parts, col_defs)]
-
-    # Pad with missing cols
-    cols = cols + [[] for _ in range(4 - len(cols))]
-
-    # Pad with empty cells
-    max_len = max(len(col) for col in cols)
-    cols = [col + [ZERO_CELL] * (max_len - len(col))
-            for col in cols]
-    return zip(*cols)
-
-########################################################################
-# Pretty printing (maybe not useful)
-########################################################################
-def pretty_insn(ind, cmd, arg):
-    if cmd in (INSN_JUMP, INSN_PLAY, INSN_DUR, INSN_SAMPLE, INSN_REPEAT):
-        str = '%-2s %4d' % (cmd.upper(), arg)
-    else:
-        str = cmd.upper()
-    return ' ' * ind + str
-
-def prettyprint_mycode(mycode):
-    ind = 0
-    for cmd, arg in mycode:
-        if cmd == INSN_END_BLOCK:
-           ind -= 2
-        print(pretty_insn(ind, cmd, arg))
-        if cmd == INSN_REPEAT:
-            ind += 2
-
 ########################################################################
 # Cache generation
 ########################################################################
+def mod_file_to_mycode_safe(fname):
+    try:
+        return mod_file_to_mycode(fname)
+    except PowerPackerModule:
+        SP.print('Skipping PP20 module.')
+        return None
+
 def disk_corpus_to_mycode_cache(corpus_path, mods):
     SP.header('PARSING', '%d modules', len(mods))
     fnames = [corpus_path / mod.genre / mod.fname for mod in mods]
-    seq = sum([list(mod_file_to_mycode(fname))
-               for fname in fnames], [])
+    seq = [mod_file_to_mycode_safe(fname) for fname in fnames]
+    seq = [e for e in seq if e]
     SP.leave()
     return seq
 
@@ -334,66 +223,25 @@ def load_cache(cache_path):
     with open(cache_path, 'rb') as f:
         return load(f)
 
-def limit_argument(cmd, arg, max_note_delta, max_sample_delta):
-    if cmd == INSN_PLAY:
-        return cmd, INPUT_ARG if abs(arg) > max_note_delta else arg
-    elif cmd == INSN_SAMPLE:
-        return cmd, INPUT_ARG if abs(arg) > max_sample_delta else arg
-    return cmd, arg
-
-def limit_arguments(seq, max_note_delta, max_sample_delta):
-    return [limit_argument(cmd, arg, max_note_delta, max_sample_delta)
-            for (cmd, arg) in seq]
-
-def cache_file_name(mods, kb_limit, max_note_delta, max_sample_delta):
+def cache_file_name(mods, kb_limit):
     size_sum = sum(mod.kb_size for mod in mods)
-    fmt = 'cache-%010d-%04d-%02d-%02d.pickle'
-    return fmt % (size_sum, kb_limit, max_note_delta, max_sample_delta)
+    fmt = 'cache-%010d-%04d.pickle'
+    return fmt % (size_sum, kb_limit)
 
-def corpus_to_mycode(corpus_path, kb_limit,
-                     max_note_delta, max_sample_delta):
+def corpus_to_mycode(corpus_path, kb_limit):
     index = load_index(corpus_path)
     mods = [mod for mod in index.values()
             if (mod.n_channels == 4
                 and mod.format == 'MOD'
                 and mod.kb_size <= kb_limit)]
 
-    cache_file = cache_file_name(mods, kb_limit,
-                                 max_note_delta, max_sample_delta)
-
+    cache_file = cache_file_name(mods, kb_limit)
     cache_path = corpus_path / cache_file
     if not cache_path.exists():
         seq = disk_corpus_to_mycode_cache(corpus_path, mods)
-
-        # Filter out uncommon tokens.
-        seq = limit_arguments(seq, 26, 20)
-
-
         SP.print('Saving cache...')
         with open(cache_path, 'wb') as f:
             dump(seq, f)
     else:
         SP.print('Using cache at %s.', cache_path)
     return load_cache(cache_path)
-
-########################################################################
-# Debugging and analysis
-########################################################################
-def check_mycode(rows1, mycode):
-    col_defs = [next(column_to_notes(rows1, col_idx), (0, 0, 0))
-                for col_idx in range(4)]
-    col_defs = [(sample, note) for (_, note, sample) in col_defs]
-
-    rows2 = list(mycode_to_rows(mycode, col_defs))
-    assert len(rows1) == len(rows2)
-    for row1, row2 in zip(rows1, rows2):
-        for cell1, cell2 in zip(row1, row2):
-            note1 = period_to_idx(cell1.period)
-            note2 = period_to_idx(cell2.period)
-            assert note1 == note2
-            # Samples without periods skipped
-            if not cell1.period and not cell2.period:
-                continue
-            if not cell1.sample_idx == cell2.sample_idx:
-                print('Diff at row %d' % row_idx)
-            assert cell1.sample_idx == cell2.sample_idx

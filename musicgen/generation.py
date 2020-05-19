@@ -4,7 +4,6 @@
 from collections import namedtuple
 from itertools import groupby
 from mido import Message, MidiFile, MidiTrack
-from musicgen.mycode import mycode_to_notes
 from musicgen.utils import SP, sort_groupby
 
 Programs = namedtuple('Programs', ['melodic', 'percussive'])
@@ -124,12 +123,3 @@ def notes_to_midi_file(notes, midi_file, midi_mapping):
         track = MidiTrack(track)
         midi.tracks.append(track)
     midi.save(midi_file)
-
-def mycode_to_midi_file(seq, midi_file, programs):
-    notes = list(mycode_to_notes(seq))
-
-    groups = [(n.sample_idx, n.note_idx) for n in notes]
-    groups = sort_groupby(groups, lambda n: n[0])
-    samples = [(idx, len(set(grp)) == 1, 4) for (idx, grp) in groups]
-    midi_mapping = assign_instruments(samples, programs)
-    notes_to_midi_file(notes, midi_file, midi_mapping)
