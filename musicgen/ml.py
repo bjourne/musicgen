@@ -7,9 +7,8 @@ from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
 from musicgen.keras_utils import OneHotGenerator
 from musicgen.generation import mycode_to_midi_file
-from musicgen.mycode import (INSN_PROGRAM, corpus_to_mycode,
-                             linearize_mycode_mods)
-from musicgen.utils import SP
+from musicgen.mycode import INSN_PROGRAM, corpus_to_mycode_mods
+from musicgen.utils import SP, file_name_for_params
 from random import choice, randrange
 import numpy as np
 
@@ -23,7 +22,8 @@ def make_model(seq_len, n_chars):
     model.add(Dense(n_chars))
     model.add(Activation('softmax'))
     model.compile(loss = 'categorical_crossentropy',
-                  optimizer = 'rmsprop')
+                  optimizer = 'rmsprop',
+                  metrics = ['accuracy'])
     print(model.summary())
     return model
 
@@ -35,96 +35,71 @@ def weighted_sample(probs, temperature):
     probas = np.random.multinomial(1, probs, 1)
     return np.argmax(probas)
 
-def generate_seq(model, seed, n_generate, temp, n_chars, skip_el):
-    seq_len = len(seed)
-    for _ in range(n_generate):
-        X = np.zeros((1, seq_len, n_chars))
-        for t, idx in enumerate(seed):
-            X[0, t, idx] = 1
+def generate_sequence(model, vocab_size, seed, seq_len, temp, pad_int):
+    for _ in range(seq_len):
+        X = np.zeros((1, seed.size, vocab_size), dtype = np.int)
+        X[0, np.arange(seed.size), seed] = 1
         P = model.predict(X, verbose = 0)[0]
         while True:
             if temp is None:
                 idx = np.random.choice(len(P), p = P)
             else:
                 idx = weighted_sample(P, temp)
-            if idx != skip_el:
+            if idx != pad_int:
                 break
         yield idx
-        seed = seed[1:] + [idx]
+        seed = np.roll(seed, -1)
+        seed[-1] = idx
 
-def generate_mycode(model, seed, n_generate, temp, char2idx, idx2char):
-    skip_el = char2idx[(INSN_PROGRAM, 0)]
-    n_chars = len(char2idx)
-    seq = generate_seq(model, seed, n_generate, temp, n_chars, skip_el)
-    mycode = [idx2char[i] for i in seq]
-    print(mycode)
-    return mycode
+def generate_sequences(model, seq, epoch, vocab_size, win_size, pad_int):
+    while True:
+        idx = randrange(len(seq) - win_size)
+        seed = np.array(seq[idx:idx + win_size])
+        if not pad_int in seed:
+            break
 
-def generate_music(model, n_epoch, seq, seq_len, model_path,
-                   char2idx, idx2char):
-    SP.header('EPOCH', '%d', n_epoch)
-    idx = randrange(len(seq) - seq_len)
-    seed = list(seq[idx:idx + seq_len])
-    for temp in [None, 0.2, 0.5, 1.0, 1.2]:
-        fmt = '%s' if temp is None else '%.2f'
-        temp_str = fmt % temp
-        SP.header('TEMPERATURE %s' % temp_str)
-        mycode = generate_mycode(model, seed, 200, temp,
-                                 char2idx, idx2char)
+    temps = [None, 0.2, 0.5, 1.0, 1.2]
+    for temp in temps:
+        seq = generate_sequence(model, vocab_size, seed, 200,
+                                temp, pad_int)
+        yield temp, seq
 
-        fname = 'gen-%03d-%s.mid' % (n_epoch, temp_str)
-        file_path = model_path / fname
-        mycode_to_midi_file(mycode, file_path, 120, None)
-        SP.leave()
-    SP.leave()
-
-def train_model(corpus_path, win_size, step, batch_size):
-    seq = corpus_to_mycode(corpus_path, 150)
-    seq = linearize_mycode_mods(seq)
-
-
-    # Different tokens in sequence
-    chars = sorted(set(seq))
-    vocab_size = len(chars)
-    char2idx = {c : i for i, c in enumerate(chars)}
-    idx2char = {i : c for i, c in enumerate(chars)}
-
-    # Cut sequence
-    seq = seq[:len(seq) // 10]
-
-    # Convert to integer sequence
-    int_seq = np.array([char2idx[c] for c in seq])
-
-    SP.print(f'Training model with %d tokens and %d characters.',
-             (len(seq), vocab_size))
-
+def train_model(train, validate, test,
+                 model_path, vocab_size,
+                 win_size, batch_size, fun, pad_int):
+    n_train = len(train)
+    n_validate = len(validate)
     model = make_model(win_size, vocab_size)
 
-    weights_path = corpus_path / 'weights.hdf5'
+    params = (win_size, batch_size, n_train, n_validate)
+    weights_file = file_name_for_params('weights', 'hdf5', params)
+
+    weights_path = model_path / weights_file
     if weights_path.exists():
-        SP.print(f'Loading existing weights from "{weights_path}".')
+        SP.print(f'Loading weights from {weights_path}.')
         model.load_weights(weights_path)
 
-    gen = OneHotGenerator(int_seq, batch_size, win_size, vocab_size)
+    train_gen = OneHotGenerator(train, batch_size, win_size, vocab_size)
+    validate_gen = OneHotGenerator(validate,
+                                   batch_size, win_size, vocab_size)
 
     cb_checkpoint = ModelCheckpoint(
         str(weights_path),
-        monitor = 'loss',
+        monitor = 'val_loss',
         verbose = 1,
         save_best_only = True,
         mode = 'min'
     )
-
-    def on_epoch_begin(n_epoch, logs):
-        generate_music(model, n_epoch, int_seq, win_size,
-                       corpus_path,
-                       char2idx, idx2char)
+    def on_epoch_begin(epoch, logs):
+        seqs = generate_sequences(model, test, epoch,
+                                  vocab_size, win_size, pad_int)
+        fun(epoch, seqs)
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
-
-    callbacks = [cb_checkpoint, cb_generate]
-    model.fit_generator(generator = gen,
-                        steps_per_epoch = len(seq) // batch_size,
-                        epochs = 10,
-                        verbose = 1,
-                        shuffle = False,
-                        callbacks = callbacks)
+    model.fit(x = train_gen,
+              steps_per_epoch = n_train // batch_size,
+              validation_data = validate_gen,
+              validation_steps = n_validate // batch_size,
+              verbose = 1,
+              shuffle = True,
+              epochs = 10,
+              callbacks = [cb_checkpoint, cb_generate])

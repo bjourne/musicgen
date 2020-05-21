@@ -8,8 +8,8 @@ from musicgen.analyze import sample_props
 from musicgen.corpus import load_index
 from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import ModNote, linearize_rows, column_to_mod_notes
-from musicgen.utils import SP
-from pickle import dump, load
+from musicgen.utils import (SP, file_name_for_params,
+                            load_pickle, save_pickle)
 
 def produce_jumps(delta):
     thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
@@ -111,14 +111,6 @@ class MyCodedModule:
         self.time_ms = time_ms
         self.cols = cols
 
-    def linearize(self):
-        start_tok = (INSN_PROGRAM, 0)
-        seq = []
-        for first_pitch, insns in self.cols:
-            seq.append(start_tok)
-            seq.extend(insns)
-        return seq
-
 def mod_file_to_mycode(file_path):
     SP.print(str(file_path))
     mod = load_file(file_path)
@@ -144,13 +136,6 @@ def mod_file_to_mycode(file_path):
     cols = [mod_notes_to_mycode(notes, instruments, n_rows)
             for notes in col_notes]
     return MyCodedModule(file_path.name, time_ms, cols)
-
-def linearize_mycode_mods(data):
-    SP.print('Linearizing %d entries.' % len(data))
-    seq = []
-    for mycode_mod in data:
-        seq.extend(mycode_mod.linearize())
-    return seq
 
 ########################################################################
 # Guessing logic
@@ -210,7 +195,7 @@ def mod_file_to_mycode_safe(fname):
         SP.print('Skipping PP20 module.')
         return None
 
-def disk_corpus_to_mycode_cache(corpus_path, mods):
+def disk_corpus_to_mycode_mods(corpus_path, mods):
     SP.header('PARSING', '%d modules', len(mods))
     fnames = [corpus_path / mod.genre / mod.fname for mod in mods]
     seq = [mod_file_to_mycode_safe(fname) for fname in fnames]
@@ -218,30 +203,21 @@ def disk_corpus_to_mycode_cache(corpus_path, mods):
     SP.leave()
     return seq
 
-def load_cache(cache_path):
-    assert cache_path.exists()
-    with open(cache_path, 'rb') as f:
-        return load(f)
-
-def cache_file_name(mods, kb_limit):
-    size_sum = sum(mod.kb_size for mod in mods)
-    fmt = 'cache-%010d-%04d.pickle'
-    return fmt % (size_sum, kb_limit)
-
-def corpus_to_mycode(corpus_path, kb_limit):
+def corpus_to_mycode_mods(corpus_path, kb_limit):
     index = load_index(corpus_path)
     mods = [mod for mod in index.values()
             if (mod.n_channels == 4
                 and mod.format == 'MOD'
                 and mod.kb_size <= kb_limit)]
 
-    cache_file = cache_file_name(mods, kb_limit)
+    size_sum = sum(mod.kb_size for mod in mods)
+    params = size_sum, kb_limit
+    cache_file = file_name_for_params('mycode_cache', 'pickle', params)
     cache_path = corpus_path / cache_file
     if not cache_path.exists():
-        seq = disk_corpus_to_mycode_cache(corpus_path, mods)
-        SP.print('Saving cache...')
-        with open(cache_path, 'wb') as f:
-            dump(seq, f)
+        seq = disk_corpus_to_mycode_mods(corpus_path, mods)
+        SP.print('Saving MyCode cache...')
+        save_pickle(cache_path, seq)
     else:
-        SP.print('Using cache at %s.', cache_path)
-    return load_cache(cache_path)
+        SP.print('Loading MyCode cache from %s.', cache_path)
+    return load_pickle(cache_path)

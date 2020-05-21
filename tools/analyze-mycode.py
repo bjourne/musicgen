@@ -15,9 +15,10 @@ Options:
 """
 from docopt import docopt
 from collections import Counter
-from musicgen.mycode import (corpus_to_mycode, mod_file_to_mycode,
-                             linearize_mycode_mods)
-from musicgen.utils import SP
+from musicgen.mycode import (INSN_PROGRAM,
+                             corpus_to_mycode_mods,
+                             mod_file_to_mycode)
+from musicgen.utils import SP, flatten
 from pathlib import Path
 from termtables import print as tt_print
 from termtables.styles import markdown
@@ -45,10 +46,13 @@ def main():
     kb_limit = int(args['--kb-limit'])
     path = Path(args['<corpus/module>'])
     if path.is_dir():
-        data = corpus_to_mycode(path, kb_limit)
+        mods = corpus_to_mycode_mods(path, kb_limit)
     else:
-        data = [mod_file_to_mycode(path)]
-    seq = linearize_mycode_mods(data)
+        mods = [mod_file_to_mycode(path)]
+
+    pad_token = INSN_PROGRAM, 0
+    seqs = [[c[1] + [pad_token] for c in mod.cols] for mod in mods]
+    seq = flatten(flatten(seqs))
     analyze_mycode(seq)
 
 if __name__ == '__main__':

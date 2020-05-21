@@ -29,12 +29,11 @@ from musicgen.generation import (MYCODE_MIDI_MAPPING,
                                  parse_programs)
 from musicgen.mycode import (INSN_JUMP,
                              INSN_PROGRAM,
-                             load_cache,
                              mycode_to_mod_notes,
                              mod_file_to_mycode)
 from musicgen.parser import load_file
 from musicgen.rows import linearize_rows, rows_to_mod_notes
-from musicgen.utils import SP
+from musicgen.utils import SP, load_pickle
 from pathlib import Path
 from random import randrange
 
@@ -66,7 +65,8 @@ def mod_file_to_midi_file_using_mycode(mod_file, midi_file):
     notes_to_midi_file(notes, midi_file, MYCODE_MIDI_MAPPING)
 
 def random_cache_location(mycode_mods, n_insns):
-    long_jump_tok = (INSN_JUMP, 64)
+    long_jump_tok = INSN_JUMP, 64
+    stop_tok = INSN_PROGRAM, 0
     while True:
         i = randrange(len(mycode_mods))
         mycode_mod = mycode_mods[i]
@@ -77,15 +77,15 @@ def random_cache_location(mycode_mods, n_insns):
             SP.print('Only %d instructions in column.', n_col)
             continue
         k = randrange(n - n_insns)
-        if not long_jump_tok in col[k:k + n_insns]:
+        subseq = col[k:k + n_insns]
+        if not long_jump_tok in subseq and not stop_tok in subseq:
             return i, j, k
 
 def cache_file_to_midi_file(cache_file, midi_file,
                             loc, n_insns,
                             programs,
                             guess):
-    mycode_mods = load_cache(cache_file)
-    long_jump_tok = (INSN_JUMP, 64)
+    mycode_mods = load_pickle(cache_file)
     if loc == 'random':
         mod_idx, col_idx, seq_idx = random_cache_location(mycode_mods,
                                                           n_insns)

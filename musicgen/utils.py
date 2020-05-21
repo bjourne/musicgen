@@ -1,7 +1,10 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # Random utils.
+from functools import reduce
 from itertools import groupby
+from operator import iconcat
+from pickle import dump, load
 import numpy as np
 
 class StructuredPrinter:
@@ -35,8 +38,37 @@ SP = StructuredPrinter(False)
 def sort_groupby(seq, keyfun):
     return groupby(sorted(seq, key = keyfun), keyfun)
 
+def flatten(seq):
+    return reduce(iconcat, seq, [])
+
 def parse_comma_list(seq):
     return [int(e) for e in seq.split(',')]
+
+def load_pickle(pickle_path):
+    assert pickle_path.exists()
+    with open(pickle_path, 'rb') as f:
+        return load(f)
+
+def save_pickle(pickle_path, obj):
+    with open(pickle_path, 'wb') as f:
+        dump(obj, f)
+
+def file_name_for_params(base, ext, params):
+    def param_to_fmt(p):
+        if type(p) == int:
+            n = len(str(p))
+            if n > 5:
+                n = 10
+            elif n > 3:
+                n = 5
+            else:
+                n = 3
+        else:
+            return '%.2f'
+        return '%%0%dd' % n
+    strs = [param_to_fmt(p) % p for p in params]
+    return '%s_%s.%s' % (base, '-'.join(strs), ext)
+
 
 # This algorithm is to slow to be practical.
 def find_best_split(seq):

@@ -13,6 +13,7 @@ PERIODS = [
 PERIOD_TO_IDX = {p : i for i, p in enumerate(PERIODS)}
 
 def period_to_idx(period):
+    assert period > 0
     # This is a little hacky. Some cells have incorrect period values.
     idx = PERIOD_TO_IDX.get(period)
     if idx is None:

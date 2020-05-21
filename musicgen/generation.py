@@ -7,7 +7,7 @@ from mido import Message, MidiFile, MidiTrack
 from musicgen.mycode import (guess_initial_duration,
                              guess_initial_pitch,
                              mycode_to_mod_notes)
-from musicgen.utils import SP, sort_groupby
+from musicgen.utils import SP, flatten, sort_groupby
 
 Programs = namedtuple('Programs', ['melodic', 'percussive'])
 
@@ -114,7 +114,7 @@ def notes_to_midi_file(notes, midi_file, midi_mapping):
     notes_per_channel = [
         list(mod_notes_to_midi_notes(notes, midi_mapping))
         for notes in notes_per_channel]
-    notes = sorted(sum(notes_per_channel, []))
+    notes = sorted(flatten(notes_per_channel))
     SP.print('Produced %d midi notes (on/offs).' % len(notes))
 
     # Group by column (9 for drums)
