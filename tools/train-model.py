@@ -49,21 +49,6 @@ def flatten_corpus(corpus_path, win_size, kb_limit):
     seq = load_pickle(cache_path)
     return seq
 
-def generate_sequences(model, epoch, seq,
-                       vocab_size, win_size,
-                       pad_int):
-    # Pick a seed that doesn't contain padding
-    while True:
-        idx = randrange(len(seq) - win_size)
-        seed = np.array(seq[idx:idx + win_size])
-        if not pad_int in seed:
-            break
-    temps = [None, 0.2, 0.5, 1.0, 1.2, 1.5]
-    for temp in temps:
-        seq = generate_sequence(model, vocab_size, seed, 300,
-                                temp, pad_int)
-        yield temp, seq
-
 def generate_midi_files(model, epoch, seq,
                         vocab_size, win_size,
                         char2idx, idx2char, corpus_path):
@@ -104,7 +89,6 @@ def main():
     kb_limit = int(args['--kb-limit'])
 
     seq = flatten_corpus(corpus_path, win_size, kb_limit)
-    seq = seq[:len(seq) // 100]
     n_seq = len(seq)
 
     # Convert to integer sequence
