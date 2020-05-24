@@ -9,7 +9,7 @@ from musicgen.keras_utils import OneHotGenerator
 from musicgen.generation import mycode_to_midi_file
 from musicgen.mycode import INSN_PROGRAM, corpus_to_mycode_mods
 from musicgen.utils import SP, file_name_for_params
-from random import choice, randrange
+from random import choice
 import numpy as np
 
 def make_model(seq_len, n_chars):
@@ -51,22 +51,9 @@ def generate_sequence(model, vocab_size, seed, seq_len, temp, pad_int):
         seed = np.roll(seed, -1)
         seed[-1] = idx
 
-def generate_sequences(model, seq, epoch, vocab_size, win_size, pad_int):
-    while True:
-        idx = randrange(len(seq) - win_size)
-        seed = np.array(seq[idx:idx + win_size])
-        if not pad_int in seed:
-            break
-
-    temps = [None, 0.2, 0.5, 1.0, 1.2]
-    for temp in temps:
-        seq = generate_sequence(model, vocab_size, seed, 200,
-                                temp, pad_int)
-        yield temp, seq
-
-def train_model(train, validate, test,
+def train_model(train, validate,
                  model_path, vocab_size,
-                 win_size, batch_size, fun, pad_int):
+                 win_size, batch_size, fun):
     n_train = len(train)
     n_validate = len(validate)
     model = make_model(win_size, vocab_size)
@@ -91,9 +78,7 @@ def train_model(train, validate, test,
         mode = 'min'
     )
     def on_epoch_begin(epoch, logs):
-        seqs = generate_sequences(model, test, epoch,
-                                  vocab_size, win_size, pad_int)
-        fun(epoch, seqs)
+        fun(model, epoch)
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
     model.fit(x = train_gen,
               steps_per_epoch = n_train // batch_size,
