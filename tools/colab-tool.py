@@ -34,7 +34,7 @@ def get_data(connection, sftp):
         connection.get(path)
     SP.leave()
 
-def upload_code(connection, sftp):
+def upload_code(connection):
     dirs = [Path(d) for d in ['musicgen', 'tools']]
     files = flatten([[(src, d) for src in d.glob('*.py')] for d in dirs])
     SP.header('UPLOADING %d FILES' % len(files))
@@ -65,9 +65,9 @@ def main():
     sftp = connection.sftp()
     sftp.chdir(str(root_path))
     if args['get-data']:
-        get_data(connection, sftp, root_path)
+        get_data(connection, sftp)
     elif args['upload-code']:
-        upload_code(connection, sftp, root_path)
+        upload_code(connection)
     elif args['run-training']:
         run_training(connection, root_path)
 
