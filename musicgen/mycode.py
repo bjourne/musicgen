@@ -1,14 +1,14 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # MyCode is a bad name for the internal data format I'm using.
-# from collections import namedtuple
-from construct import Container
-from itertools import groupby, takewhile
+from itertools import takewhile
 from musicgen.analyze import sample_props
 from musicgen.corpus import load_index
 from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import ModNote, linearize_rows, column_to_mod_notes
+from musicgen.ssrs import find_min_ssr
 from musicgen.utils import (SP, file_name_for_params,
+                            flatten,
                             load_pickle, save_pickle)
 
 def produce_jumps(delta):
@@ -45,9 +45,36 @@ INSN_PLAY = 'P'
 INSN_PROGRAM = 'X'
 INSN_PITCH = 'I'
 
+INSN_BLOCK = 'B'
+INSN_REPEAT = 'R'
+
+def bin_repeats(reps):
+    thresholds = [16, 8, 4, 3, 2]
+    for thr in thresholds:
+        if reps >= thr:
+            return thr
+    return 1
+
+MIN_PACK = 4
+def pack_mycode(seq):
+    if len(seq) <= MIN_PACK:
+        return seq
+    start, w, reps = find_min_ssr(seq)
+
+    if reps == 1 or reps * w < MIN_PACK:
+        return seq
+
+    p1 = pack_mycode(seq[:start])
+    p2 = pack_mycode(seq[start:start + w])
+    p3 = pack_mycode(seq[start + w*reps:])
+
+    block_tok = (INSN_BLOCK, 0)
+    rep_tok = (INSN_REPEAT, bin_repeats(reps))
+
+    return p1 + [block_tok] + p2 + [rep_tok] + p3
+
 def mod_notes_to_mycode(notes, instruments, n_rows):
     seq = []
-
     first_jump = notes[0].row_idx if notes else n_rows
     for jump in produce_jumps(first_jump):
         seq.append((INSN_JUMP, jump))
@@ -76,6 +103,7 @@ def mod_notes_to_mycode(notes, instruments, n_rows):
         for jump in produce_jumps(jump):
             seq.append((INSN_JUMP, jump))
     return first_pitch, seq
+    #return first_pitch, pack_mycode(seq)
 
 def mycode_to_mod_notes(seq, col_idx, time_ms, pitch_idx, dur):
     row_idx = 0
@@ -116,12 +144,9 @@ def mod_file_to_mycode(file_path):
     mod = load_file(file_path)
     rows = linearize_rows(mod)
 
-    # Map samples to their instruments (1..4)
     volumes = [64] * 32
-
     col_notes = [column_to_mod_notes(rows, i, volumes) for i in range(4)]
-    all_notes = sum(col_notes, [])
-
+    all_notes = flatten(col_notes)
     instruments = {}
     n_perc = 0
     for sample_idx, props in sample_props(mod, all_notes):
@@ -211,7 +236,7 @@ def corpus_to_mycode_mods(corpus_path, kb_limit):
                 and mod.kb_size <= kb_limit)]
 
     size_sum = sum(mod.kb_size for mod in mods)
-    params = size_sum, kb_limit
+    params = (size_sum, kb_limit)
     cache_file = file_name_for_params('mycode_cache', 'pickle', params)
     cache_path = corpus_path / cache_file
     if not cache_path.exists():

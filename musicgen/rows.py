@@ -4,7 +4,7 @@ from musicgen.defs import (DEFAULT_SPEED, DEFAULT_TEMPO,
                            EFFECT_CMD_SET_VOLUME,
                            Note,
                            period_to_idx)
-from musicgen.utils import SP
+from musicgen.utils import SP, flatten
 
 def linearize_rows(mod):
     table_idx = 0
@@ -105,10 +105,8 @@ def column_to_mod_notes(rows, col_idx, volumes):
         if not sample_idx <= 0x1f:
             continue
 
-        # Sample but no note
+        # Sample but no note, we skip these.
         if sample_idx and not period:
-            fmt = 'Missing period for sample %2d at cell %4d:%d.'
-            SP.print(fmt % (sample_idx, row_idx, col_idx))
             continue
 
         # Period but no sample
@@ -138,5 +136,5 @@ def column_to_mod_notes(rows, col_idx, volumes):
     return notes
 
 def rows_to_mod_notes(rows, volumes):
-    return sum([column_to_mod_notes(rows, i, volumes)
-                for i in range(4)], [])
+    return flatten([column_to_mod_notes(rows, i, volumes)
+                    for i in range(4)])

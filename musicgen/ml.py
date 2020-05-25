@@ -65,6 +65,8 @@ def train_model(train, validate,
     if weights_path.exists():
         SP.print(f'Loading weights from {weights_path}.')
         model.load_weights(weights_path)
+    else:
+        SP.print(f'Weights file {weights_path} not found.')
 
     train_gen = OneHotGenerator(train, batch_size, win_size, vocab_size)
     validate_gen = OneHotGenerator(validate,

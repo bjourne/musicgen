@@ -4,8 +4,7 @@
 """MyCode analyzer
 
 Usage:
-    analyze-mycode.py [-v] [--max-note-delta=<int>]
-        [--max-sample-delta=<int>] [--kb-limit=<int>]
+    analyze-mycode.py [-v] [--kb-limit=<int>]
         <corpus/module>
 
 Options:

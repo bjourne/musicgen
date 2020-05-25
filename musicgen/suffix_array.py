@@ -20,3 +20,24 @@ def suffix_array(seq):
         n *= 2
     cls1 = np.roll(cls, n // 2)
     return np.lexsort((cls1, cls))[1:].tolist()
+
+def lcp_array(seq, sa):
+    '''Returns both the rank array and the lcp array.'''
+    n = len(sa)
+    lcp = [0] * n
+    rank = [0] * n
+    for i in range(n):
+        rank[sa[i]] = i
+    k = 0
+    for i, rank_el in enumerate(rank):
+        if rank_el == n - 1:
+            k = 0
+            continue
+        j = sa[rank_el + 1]
+        while i + k < n and j + k < n and seq[i + k] == seq[j + k]:
+            k += 1
+        lcp[rank_el] = k
+        if k > 0:
+            k -= 1
+    lcp = [lcp[-1]] + lcp[:-1]
+    return rank, lcp
