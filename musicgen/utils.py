@@ -62,6 +62,8 @@ def file_name_for_params(base, ext, params):
                 n = 5
             else:
                 n = 3
+        elif type(p) == bool:
+            return '%s'
         else:
             return '%.2f'
         return '%%0%dd' % n

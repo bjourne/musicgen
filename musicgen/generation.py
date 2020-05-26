@@ -127,10 +127,12 @@ def notes_to_midi_file(notes, midi_file, midi_mapping):
         midi.tracks.append(track)
     midi.save(midi_file)
 
-MYCODE_MIDI_MAPPING = {1 : [1, 36, 4, 1.0],
-                       2 : [-1, 40, 4, 1.0],
-                       3 : [-1, 36, 4, 1.0],
-                       4 : [-1, 31, 4, 1.0]}
+MYCODE_MIDI_MAPPING = {
+    1 : [1, 36, 4, 1.0],
+    2 : [-1, 40, 4, 1.0],
+    3 : [-1, 36, 4, 1.0],
+    4 : [-1, 31, 4, 1.0]
+}
 
 def mycode_to_midi_file(seq, midi_file, time_ms, pitch_idx):
     if pitch_idx is None:

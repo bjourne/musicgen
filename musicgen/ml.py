@@ -6,9 +6,7 @@ from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
 from musicgen.keras_utils import OneHotGenerator
-from musicgen.generation import mycode_to_midi_file
-from musicgen.mycode import INSN_PROGRAM, corpus_to_mycode_mods
-from musicgen.utils import SP, file_name_for_params
+from musicgen.utils import SP
 from random import choice
 import numpy as np
 
@@ -52,16 +50,11 @@ def generate_sequence(model, vocab_size, seed, seq_len, temp, pad_int):
         seed[-1] = idx
 
 def train_model(train, validate,
-                 model_path, vocab_size,
-                 win_size, batch_size, fun):
+                weights_path, vocab_size,
+                win_size, batch_size, fun):
     n_train = len(train)
     n_validate = len(validate)
     model = make_model(win_size, vocab_size)
-
-    params = (win_size, batch_size, n_train, n_validate)
-    weights_file = file_name_for_params('weights', 'hdf5', params)
-
-    weights_path = model_path / weights_file
     if weights_path.exists():
         SP.print(f'Loading weights from {weights_path}.')
         model.load_weights(weights_path)

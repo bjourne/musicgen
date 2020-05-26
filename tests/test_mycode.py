@@ -11,7 +11,7 @@ def test_initial_jumps_1():
 
     volumes = [64] * 32
     notes = column_to_mod_notes(rows, 3, volumes)
-    _, seq = mod_notes_to_mycode(notes, {}, len(rows))
+    _, seq = mod_notes_to_mycode(notes, {}, len(rows), False)
 
     n_jumps = len(rows) // 64
     assert seq == [(INSN_JUMP, 64)] * n_jumps
@@ -22,7 +22,7 @@ def test_initial_jumps_2():
 
     volumes = [64] * 32
     notes = column_to_mod_notes(rows, 3, volumes)
-    first_pitch, seq = mod_notes_to_mycode(notes, {}, len(rows))
+    first_pitch, seq = mod_notes_to_mycode(notes, {}, len(rows), False)
 
     silence_seq = [(INSN_JUMP, 64)] * 38 + [(INSN_JUMP, 32)]
     assert first_pitch is None

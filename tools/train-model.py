@@ -2,13 +2,16 @@
 """Model trainer
 
 Usage:
-    train-model.py [-v --win-size=<int> --kb-limit=<int>] <corpus-path>
+    train-model.py [-v --win-size=<int> --kb-limit=<int> --pack-mycode]
+        [--fraction=<float>] <corpus-path>
 
 Options:
     -h --help              show this screen
     -v --verbose           print more output
     --win-size=<int>       window size [default: 64]
     --kb-limit=<int>       kb limit [default: 150]
+    --pack-mycode          use packed mycode
+    --fraction=<float>     fraction of corpus to use [default: 1.0]
 """
 from docopt import docopt
 from musicgen.generation import mycode_to_midi_file
@@ -26,17 +29,18 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 PAD_TOKEN = (INSN_PROGRAM, 0)
 
-def flatten_corpus(corpus_path, win_size, kb_limit):
-    mycode_mods = corpus_to_mycode_mods(corpus_path, kb_limit)
+def flatten_corpus(corpus_path, win_size, kb_limit, do_pack, fraction):
+    mycode_mods = corpus_to_mycode_mods(corpus_path, kb_limit, do_pack)
     n_mods = len(mycode_mods)
 
-    params = [n_mods, win_size, kb_limit]
+    params = (n_mods, win_size, kb_limit, do_pack, fraction)
     cache_file = file_name_for_params('flat_cache', 'pickle', params)
     cache_path = corpus_path / cache_file
     if not cache_path.exists():
         seqs = [[c[1] for c in mycode_mod.cols]
                 for mycode_mod in mycode_mods]
         seqs = flatten(seqs)
+        seqs = seqs[:int(len(seqs) * fraction)]
         shuffle(seqs)
         padding = [PAD_TOKEN] * win_size
         for seq in seqs:
@@ -87,8 +91,11 @@ def main():
     corpus_path = Path(args['<corpus-path>'])
     win_size = int(args['--win-size'])
     kb_limit = int(args['--kb-limit'])
+    do_pack = args['--pack-mycode']
+    fraction = float(args['--fraction'])
 
-    seq = flatten_corpus(corpus_path, win_size, kb_limit)
+    seq = flatten_corpus(corpus_path, win_size, kb_limit,
+                         do_pack, fraction)
     n_seq = len(seq)
 
     # Convert to integer sequence
@@ -109,13 +116,18 @@ def main():
     fmt = '%d, %d, and %d tokens in train, validate, and test sequences.'
     SP.print(fmt % (n_train, n_validate, n_test))
 
+    # Path to weights file
+    params = (win_size, n_train, n_validate, do_pack)
+    weights_file = file_name_for_params('weights', 'hdf5', params)
+    weights_path = corpus_path / weights_file
+
     def on_epoch_begin(model, epoch):
         generate_midi_files(model, epoch, test,
                             vocab_size, win_size,
                             char2idx, idx2char, corpus_path)
 
     train_model(train, validate,
-                corpus_path, vocab_size, win_size, 128,
+                weights_path, vocab_size, win_size, 128,
                 on_epoch_begin)
 
 if __name__ == '__main__':

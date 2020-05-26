@@ -10,6 +10,8 @@ Usage:
     colab-tool.py [-v] --port=<str> --password=<int> --root-path=<str>
         upload-code
     colab-tool.py [-v] --port=<str> --password=<int> --root-path=<str>
+        upload-caches <corpus-path>
+    colab-tool.py [-v] --port=<str> --password=<int> --root-path=<str>
         run-training
 
 Options:
@@ -34,14 +36,23 @@ def get_data(connection, sftp):
         connection.get(path)
     SP.leave()
 
-def upload_code(connection):
-    dirs = [Path(d) for d in ['musicgen', 'tools']]
-    files = flatten([[(src, d) for src in d.glob('*.py')] for d in dirs])
+def upload_files(connection, files):
     SP.header('UPLOADING %d FILES' % len(files))
     for src, dst in sorted(files):
         SP.print('%-30s => %s' % (src, dst))
         connection.put(str(src), str(dst))
     SP.leave()
+
+
+def upload_code(connection):
+    dirs = [Path(d) for d in ['musicgen', 'tools']]
+    files = flatten([[(src, d) for src in d.glob('*.py')] for d in dirs])
+    upload_files(connection, files)
+
+def upload_caches(connection, corpus_path):
+    caches = corpus_path.glob('*.pickle')
+    files = [(c, c.name) for c in caches]
+    upload_files(connection, files)
 
 def run_training(connection, root_path):
     cmds = ['pip3 install mido construct',
@@ -70,6 +81,11 @@ def main():
         upload_code(connection)
     elif args['run-training']:
         run_training(connection, root_path)
+    elif args['upload-caches']:
+        corpus_path = Path(args['<corpus-path>'])
+        upload_caches(connection, corpus_path)
+    else:
+        assert False
 
 if __name__ == '__main__':
     main()

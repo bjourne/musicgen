@@ -11,7 +11,7 @@ Options:
     -h --help              show this screen
     -v --verbose           print more output
     --kb-limit=<int>       kb limit [default: 150]
-    --pack-mycode          pack the code
+    --pack-mycode          use packed mycode
     --print                print the code
 """
 from docopt import docopt

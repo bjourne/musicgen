@@ -56,7 +56,8 @@ def mod_file_to_midi_file(mod_file, midi_file,
     notes_to_midi_file(notes, midi_file, midi_mapping)
 
 def mod_file_to_midi_file_using_mycode(mod_file, midi_file):
-    mycode = mod_file_to_mycode(mod_file)
+    # Can't use packing here since it is not exact.
+    mycode = mod_file_to_mycode(mod_file, False)
     time_ms = mycode.time_ms
     notes = [mycode_to_mod_notes(seq, i, time_ms, pitch_idx, None)
              for i, (pitch_idx, seq)
@@ -74,7 +75,7 @@ def random_cache_location(mycode_mods, n_insns):
         _, col = mycode_mod.cols[j]
         n = len(col)
         if n - n_insns <= 0:
-            SP.print('Only %d instructions in column.', n_col)
+            SP.print('Only %d instructions in column.', n)
             continue
         k = randrange(n - n_insns)
         subseq = col[k:k + n_insns]
