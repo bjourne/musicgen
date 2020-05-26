@@ -272,3 +272,16 @@ def corpus_to_mycode_mods(corpus_path, kb_limit, do_pack):
     else:
         SP.print('Loading MyCode cache from %s.', cache_path)
     return load_pickle(cache_path)
+
+########################################################################
+# Prettyprinting
+########################################################################
+def mycode_to_string(seq):
+    def insn_to_str(insn):
+        cmd, arg = insn
+        if cmd == INSN_BLOCK:
+            return 'B['
+        elif cmd == INSN_REPEAT:
+            return ']R%d' % arg
+        return '%s%s' % (cmd, arg)
+    return ' '.join(insn_to_str(insn) for insn in seq)

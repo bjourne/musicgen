@@ -16,7 +16,9 @@ Options:
 from docopt import docopt
 from musicgen.generation import mycode_to_midi_file
 from musicgen.ml import generate_sequence, train_model
-from musicgen.mycode import INSN_JUMP, INSN_PROGRAM, corpus_to_mycode_mods
+from musicgen.mycode import (INSN_JUMP, INSN_PROGRAM,
+                             corpus_to_mycode_mods,
+                             mycode_to_string)
 from musicgen.utils import (SP, file_name_for_params,
                             flatten, load_pickle, save_pickle)
 from os import environ
@@ -77,7 +79,7 @@ def generate_midi_files(model, epoch, seq,
         fmt = '%s' if temp is None else '%.2f'
         temp_str = fmt % temp
         SP.header('TEMPERATURE %s' % temp_str)
-        SP.print(seq)
+        SP.print(mycode_to_string(seq))
         file_name = 'gen-%03d-%s.mid' % (epoch, temp_str)
         file_path = corpus_path / file_name
         mycode_to_midi_file(seq, file_path, 120, None)
