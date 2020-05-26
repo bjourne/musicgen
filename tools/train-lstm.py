@@ -1,8 +1,8 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-"""Model trainer
+"""LSTM Model trainer
 
 Usage:
-    train-model.py [-v --win-size=<int> --kb-limit=<int> --pack-mycode]
+    train-lstm.py [-v --win-size=<int> --kb-limit=<int> --pack-mycode]
         [--fraction=<float>] <corpus-path>
 
 Options:
@@ -85,7 +85,7 @@ def generate_midi_files(model, epoch, seq,
     SP.leave()
 
 def main():
-    args = docopt(__doc__, version = 'MOD model builder 1.0')
+    args = docopt(__doc__, version = 'LSTM Model trainer 1.0')
     SP.enabled = args['--verbose']
 
     corpus_path = Path(args['<corpus-path>'])
