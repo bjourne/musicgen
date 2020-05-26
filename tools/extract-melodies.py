@@ -1,12 +1,30 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-from argparse import ArgumentParser, FileType
+"""MOD Melody Extractor
+
+Usage:
+    extract-melodies.py [options] <input-mod> <output-mod>
+
+Options:
+    -h --help              show this screen
+    -v --verbose           print more output
+    --trailer=<i>          length of melody trailer
+    --min-length=<i>       min number of notes in melody
+    --min-unique=<i>       min number of unique notes in melody
+    --max-repeat=<i>       max number of repeated notes in melody
+    --max-distance=<i>     max number of rows between notes in melody
+    --no-transpose         don't transpose melody to C
+    --mu-factor=<f>        max mean note distance factor [default: 3.0]
+    --mu-threshold=<f>     min notes before measuring mu [default: 5]
+"""
 from construct import Container
+from docopt import docopt
 from itertools import groupby
 from musicgen.defs import (DEFAULT_SPEED, DEFAULT_TEMPO, PERIODS,
                            period_to_idx)
 from musicgen.parser import load_file, save_file
 from musicgen.prettyprint import cell_to_string
 from musicgen.rows import linearize_rows, update_timings
+from musicgen.utils import SP, flatten
 from sys import exit
 
 def group_completion(buf, cell,
@@ -188,71 +206,45 @@ def rows_to_patterns(rows):
         yield dict(rows = rows_to_pattern(rows[i:i + 64]))
 
 def main():
-    parser = ArgumentParser(
-        description = 'Isolate melodies in MOD files')
-    parser.add_argument('input_module', type = FileType('rb'))
-    parser.add_argument('output_module', type = FileType('wb'))
-    parser.add_argument(
-        '--trailer', type = int, required = True,
-        help = 'length of melody trailer')
-    parser.add_argument(
-        '--min-length', type = int,
-        help = 'minimum number of notes in a melody')
-    parser.add_argument(
-        '--min-unique', type = int,
-        help = 'minimum number of unique notes in a melody')
-    parser.add_argument(
-        '--max-repeat', type = int, required = True,
-        help = 'maximum number of repeated notes in a melody')
-    parser.add_argument(
-        '--max-distance', type = int, required = True,
-        help = 'maximum distance between notes in a melody')
-    parser.add_argument(
-        '--mu-factor', type = float, default = 3.0,
-        help = 'maximum factor of mean note distance allowed')
-    parser.add_argument(
-        '--mu-threshold', type = int, default = 5,
-        help = 'minimum number of notes before measuring the mu factor')
-    parser.add_argument(
-        '--transpose',
-        help = 'transpose all melodies to c',
-        type = eval,
-        choices = [True, False],
-        default = 'True')
-    parser.add_argument(
-        '--info', action = 'store_true',
-        help = 'print debug stuff')
+    args = docopt(__doc__, version = 'MOD Melody Extractor 1.0')
 
-    args = parser.parse_args()
-    args.input_module.close()
-    args.output_module.close()
-    mod = load_file(args.input_module.name)
+    # Argument parsing
+    SP.enabled = args['--verbose']
+    input_file = args['<input-mod>']
+    output_file = args['<output-mod>']
+    max_distance = int(args['--max-distance'])
+    min_length = int(args['--min-length'])
+    min_unique = int(args['--min-unique'])
+    max_repeat = int(args['--max-repeat'])
+    mu_factor = float(args['--mu-factor'])
+    mu_threshold = int(args['--mu-threshold'])
+    trailer = int(args['--trailer'])
+    transpose = not args['--no-transpose']
+
+    # Load mod
+    mod = load_file(input_file)
     rows = linearize_rows(mod)
 
-    melodies = sum(
-        [list(extract_sample_groups(rows, col_idx,
-                                    args.max_distance,
-                                    args.mu_factor,
-                                    args.mu_threshold))
-         for col_idx in range(4)], [])
-
+    # Extract and filter melodies
+    melodies = flatten(extract_sample_groups(rows, col_idx,
+                                             max_distance,
+                                             mu_factor,
+                                             mu_threshold)
+                       for col_idx in range(4))
     melodies = [melody for (melody, msg) in melodies
-                if is_melody(melody,
-                             args.min_length,
-                             args.min_unique,
-                             args.max_repeat)]
+                if is_melody(melody, min_length, min_unique, max_repeat)]
 
-    if args.transpose:
+    if transpose:
         melodies = [move_to_c(melody) for melody in melodies]
-
     melodies = [remove_ending_silence(melody)
                 for melody in filter_duplicate_melodies(melodies)]
-    if args.info:
-        print(f'=== {len(melodies)} MELODIES ===')
-        for melody in melodies:
-            print('\n'.join(cell_to_string(c) for c in melody))
-            print()
-    melodies = [add_trailer(melody, args.trailer) for melody in melodies]
+    SP.header('%d MELODIES' % len(melodies))
+    for melody in melodies:
+        for cell in melody:
+            SP.print(cell_to_string(cell))
+        SP.print('')
+    SP.leave()
+    melodies = [add_trailer(melody, trailer) for melody in melodies]
     if not melodies:
         fmt = 'Sorry, found no melodies in "%s"!'
         print(fmt % args.input_module.name)
@@ -274,7 +266,7 @@ def main():
                    initials = 'M.K.'.encode('utf-8'),
                    patterns = patterns,
                    samples = mod.samples)
-    save_file(args.output_module.name, mod_out)
+    save_file(output_file, mod_out)
 
 if __name__ == '__main__':
     main()
