@@ -15,7 +15,7 @@ from time import time
 def produce_jumps(delta, do_pack):
     # Limit jumps to 8 rows to save vocabulary space.
     if do_pack:
-        delta = max(delta, 8)
+        delta = min(delta, 8)
     thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
     for threshold in thresholds:
         while delta >= threshold:
