@@ -101,11 +101,7 @@ def column_to_mod_notes(rows, col_idx, volumes):
         if period:
             col_period_idx = period
 
-        # Corrupt mod with bad sample_idx
-        if not sample_idx <= 0x1f:
-            continue
-
-        # Sample but no note, we skip these.
+        # Sample but no note, we skip those.
         if sample_idx and not period:
             continue
 
@@ -115,14 +111,20 @@ def column_to_mod_notes(rows, col_idx, volumes):
             if sample_idx is None:
                 fmt = 'Missing sample at cell %4d:%d and ' \
                     + 'no channel sample. MOD bug?'
-                print(fmt % (row_idx, col_idx))
+                SP.print(fmt % (row_idx, col_idx))
                 continue
             # fmt = 'Using last sample at cell %4d:%d'
             # SP.print(fmt % (row_idx, col_idx))
 
+        vol_idx = sample_idx - 1
+        if not 0 <= vol_idx < len(volumes):
+            fmt = 'Sample %d out of bounds at cell %4d:%d. MOD bug?'
+            SP.print(fmt % (sample_idx, row_idx, col_idx))
+            continue
+        vol = mod_note_volume(volumes[vol_idx], cell)
         pitch_idx = period_to_idx(period)
         assert 0 <= pitch_idx < 60
-        vol = mod_note_volume(volumes[sample_idx - 1], cell)
+
         note = ModNote(row_idx, col_idx,
                        sample_idx, pitch_idx,
                        vol, time_ms)

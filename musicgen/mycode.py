@@ -12,7 +12,10 @@ from musicgen.utils import (SP, file_name_for_params,
                             load_pickle, save_pickle)
 from time import time
 
-def produce_jumps(delta):
+def produce_jumps(delta, do_pack):
+    # Limit jumps to 8 rows to save vocabulary space.
+    if do_pack:
+        delta = max(delta, 8)
     thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
     for threshold in thresholds:
         while delta >= threshold:
@@ -77,7 +80,7 @@ def pack_mycode(seq):
 def mod_notes_to_mycode(notes, instruments, n_rows, do_pack):
     seq = []
     first_jump = notes[0].row_idx if notes else n_rows
-    for jump in produce_jumps(first_jump):
+    for jump in produce_jumps(first_jump, do_pack):
         seq.append((INSN_JUMP, jump))
 
     last_duration = None
@@ -101,7 +104,7 @@ def mod_notes_to_mycode(notes, instruments, n_rows, do_pack):
                     seq.append((INSN_PITCH, pitch))
             last_pitch_idx = note.pitch_idx
         seq.append((INSN_PLAY, instrument))
-        for jump in produce_jumps(jump):
+        for jump in produce_jumps(jump, do_pack):
             seq.append((INSN_JUMP, jump))
     if do_pack:
         seq = pack_mycode(seq)
@@ -162,7 +165,8 @@ def mod_file_to_mycode(file_path, do_pack):
     mod = load_file(file_path)
     rows = linearize_rows(mod)
 
-    volumes = [64] * 32
+    # Don't care about volumes
+    volumes = [64] * len(mod.sample_headers)
     col_notes = [column_to_mod_notes(rows, i, volumes) for i in range(4)]
     all_notes = flatten(col_notes)
     instruments = {}

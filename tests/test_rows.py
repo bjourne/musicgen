@@ -9,3 +9,8 @@ def test_weird_cells():
     volumes = [header.volume for header in mod.sample_headers]
     notes = column_to_mod_notes(mod.patterns[0].rows, 1, volumes)
     assert len(notes) == 32
+
+def test_broken_mod():
+    mod = load_file(TEST_PATH / 'operation_wolf-wolf31.mod')
+    volumes = [header.volume for header in mod.sample_headers]
+    notes = column_to_mod_notes(mod.patterns[1].rows, 3, volumes)
