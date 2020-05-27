@@ -2,12 +2,13 @@
 """LSTM Model based on piano rolls
 
 Usage:
-    train-gain-rolls.py [-v] [--kb-limit=<int>] module <mod>
+    train-lstm-rolls.py [-v] [--kb-limit=<i> --win-size=<i>] <corpus>
 
 Options:
     -h --help                   show this screen
     -v --verbose                print more output
-    --kb-limit=<int>            kb limit [default: 150]
+    --kb-limit=<i>              kb limit [default: 150]
+    --win-size=<i>              window size [default: 32]
 """
 from docopt import docopt
 from keras import Input
@@ -20,21 +21,51 @@ from keras.optimizers import RMSprop, SGD
 from keras.utils import Sequence, to_categorical
 from mido import Message, MidiFile, MidiTrack
 from musicgen.analyze import sample_props
+from musicgen.corpus import load_index
 from musicgen.defs import period_to_idx
 from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import linearize_rows, rows_to_mod_notes
 from musicgen.utils import (SP, file_name_for_params,
                             flatten, load_pickle, save_pickle)
+from pathlib import Path
+from random import randrange
 import numpy as np
 
 np.set_printoptions(edgeitems = 20, linewidth = 180)
 
+class WindowGenerator(Sequence):
+    def __init__(self, seq, batch_size, win_size):
+        self.seq = seq
+        self.batch_size = batch_size
+        self.win_size = win_size
+
+    def __len__(self):
+        n_windows = len(self.seq) - self.win_size
+        return int(np.ceil(n_windows / self.batch_size))
+
+    def __getitem__(self, i):
+        base = i * self.batch_size
+
+        n_windows = len(self.seq) - self.win_size
+        batch_size = min(n_windows - base, self.batch_size)
+
+        X = []
+        Y = []
+        for i in range(batch_size):
+            x = self.seq[base + i:base + i + self.win_size]
+            y = self.seq[base + i + self.win_size]
+            X.append(x)
+            Y.append(y)
+        return np.array(X), np.array(Y)
+
+VOCAB_SIZE = 39
+
 def make_model(seq_len, n_chars):
     model = Sequential()
-    model.add(LSTM(256, return_sequences = True,
+    model.add(LSTM(128, return_sequences = True,
                    input_shape = (seq_len, n_chars)))
     model.add(Dropout(0.2))
-    model.add(LSTM(256, return_sequences = False))
+    model.add(LSTM(128, return_sequences = False))
     model.add(Dropout(0.2))
     model.add(Dense(n_chars))
     model.add(Activation('softmax'))
@@ -94,7 +125,7 @@ def make_model2(seq_len, n_chars):
     x = BatchNormalization() (x)
     x = Dropout(0.22)(x)
 
-    x = Dense(39, activation='softmax')(x)
+    x = Dense(VOCAB_SIZE, activation='softmax')(x)
 
     model = Model(input_midi, x)
     optimizer = SGD(lr=0.007)
@@ -110,8 +141,17 @@ def notes_to_matrix(notes, sample_props, n_rows):
     pitches = {n.pitch_idx for n in notes
                if n.sample_idx not in percussion}
 
-    pitch_delta = min(pitch for pitch in pitches)
-    SP.print('Transposing %d steps.' % pitch_delta)
+    if not pitches:
+        SP.print('No melody.')
+        return None
+
+    min_pitch = min(pitch for pitch in pitches)
+    max_pitch = max(pitch for pitch in pitches)
+
+    pitch_range = max_pitch - min_pitch
+    if pitch_range >= 36:
+        SP.print('Pitch range %d too large' % pitch_range)
+        return None
 
     def note_to_triplet(n):
         si = n.sample_idx
@@ -119,7 +159,7 @@ def notes_to_matrix(notes, sample_props, n_rows):
             col_idx = percussion[si]
             note_dur = 4
         else:
-            col_idx = 3 + n.pitch_idx - pitch_delta
+            col_idx = 3 + n.pitch_idx - min_pitch
             assert col_idx >= 3
             sample_dur = sample_props[si].note_duration
             # Should be correct since it is set in rows_to_mod_notes
@@ -140,12 +180,15 @@ def notes_to_matrix(notes, sample_props, n_rows):
     return M[:last_nonzero_row + 1]
 
 def mod_file_to_piano_roll(file_path):
+    SP.header('PARSING %s' % str(file_path))
     mod = load_file(file_path)
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = rows_to_mod_notes(rows, volumes)
     props = sample_props(mod, notes)
-    return notes_to_matrix(notes, props, len(rows))
+    mat = notes_to_matrix(notes, props, len(rows))
+    SP.leave()
+    return mat
 
 def stop_note(note, time):
     return Message('note_off', note = note, velocity = 0, time = time)
@@ -209,28 +252,64 @@ def guess_time_ms(mat):
     SP.print('Guessed row time %d ms.' % row_time)
     return row_time
 
+def load_data_from_disk(corpus_path, mods, win_size):
+    file_paths = [corpus_path / mod.genre / mod.fname for mod in mods]
+    rolls = [mod_file_to_piano_roll(file_path)
+             for file_path in file_paths]
+    rolls = [roll for roll in rolls if roll is not None]
+
+    padding = np.zeros((win_size, VOCAB_SIZE))
+    rolls = [np.vstack((roll, padding)) for roll in rolls]
+    seq = np.vstack(rolls)
+    print(seq.shape)
+    return seq
+
+def load_data(corpus_path, kb_limit, win_size):
+    index = load_index(corpus_path)
+    mods = [mod for mod in index.values()
+            if (mod.n_channels == 4
+                and mod.format == 'MOD'
+                and mod.kb_size <= kb_limit)][:100]
+
+    size_sum = sum(mod.kb_size for mod in mods)
+    params = (size_sum, kb_limit, win_size)
+    cache_file = file_name_for_params('cache_rolls', 'npy', params)
+    cache_path = corpus_path / cache_file
+    if not cache_path.exists():
+        seq = load_data_from_disk(corpus_path, mods, win_size)
+        with open(cache_path, 'wb') as f:
+            np.save(f, seq)
+    with open(cache_path, 'rb') as f:
+        return np.load(f)
+
 def main():
     args = docopt(__doc__, version = 'LSTM Model trainer 1.0')
     SP.enabled = args['--verbose']
+    kb_limit = int(args['--kb-limit'])
+    corpus_path = Path(args['<corpus>'])
+    win_size = int(args['--win-size'])
 
-    mod_file = args['<mod>']
-    mat = mod_file_to_piano_roll(mod_file)
+    dataset = load_data(corpus_path, kb_limit, win_size)
+    n_dataset = len(dataset)
 
-    SEQ_LEN = 32
+    n_train = int(n_dataset * 0.8)
+    n_validate = int(n_dataset * 0.1)
+    n_test = n_dataset - n_train - n_validate
+    train = dataset[:n_train]
+    validate = dataset[n_train:n_train + n_validate]
 
-    X = []
-    Y = []
-    for i in range(0, len(mat) - SEQ_LEN):
-        X.append(mat[i:i + SEQ_LEN])
-        Y.append(mat[i + SEQ_LEN])
-    X = np.array(X)
-    Y = np.array(Y)
-    print(mat.shape)
-    model = make_model3(32, mat.shape[1])
-    print(model.summary())
+    batch_size = 128
+    train_gen = WindowGenerator(train, batch_size, win_size)
+    validate_gen = WindowGenerator(validate, batch_size, win_size)
 
-    model.fit(X, Y, batch_size = 32, epochs = 50, shuffle = True)
-
+    model = make_model2(win_size, VOCAB_SIZE)
+    model.fit(x = train_gen,
+             steps_per_epoch = n_train // batch_size,
+             validation_data = validate_gen,
+             validation_steps = n_validate // batch_size,
+             verbose = 1,
+             shuffle = True,
+             epochs = 10)
 
 
 if __name__ == '__main__':
