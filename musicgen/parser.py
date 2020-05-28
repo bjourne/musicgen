@@ -68,7 +68,7 @@ class EOFPaddedBytes(Bytes):
         data = stream.read(length)
         n_padding = length - len(data)
         assert n_padding >= 0
-        data += bytes([0] * n_padding)
+        data += bytes(n_padding)
         return data
 
 SampleData = Struct(

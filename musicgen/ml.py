@@ -52,8 +52,6 @@ def generate_sequence(model, vocab_size, seed, seq_len, temp, pad_int):
 def train_model(train, validate,
                 weights_path, vocab_size,
                 win_size, batch_size, fun):
-    n_train = len(train)
-    n_validate = len(validate)
     model = make_model(win_size, vocab_size)
     if weights_path.exists():
         SP.print(f'Loading weights from {weights_path}.')
@@ -61,10 +59,10 @@ def train_model(train, validate,
     else:
         SP.print(f'Weights file {weights_path} not found.')
 
-    train_gen = OneHotGenerator(train, batch_size, win_size, vocab_size)
+    train_gen = OneHotGenerator(train,
+                                      batch_size, win_size, vocab_size)
     validate_gen = OneHotGenerator(validate,
-                                   batch_size, win_size, vocab_size)
-
+                                         batch_size, win_size, vocab_size)
     cb_checkpoint = ModelCheckpoint(
         str(weights_path),
         monitor = 'val_loss',
@@ -76,9 +74,9 @@ def train_model(train, validate,
         fun(model, epoch)
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
     model.fit(x = train_gen,
-              steps_per_epoch = n_train // batch_size,
+              steps_per_epoch = len(train_gen),
               validation_data = validate_gen,
-              validation_steps = n_validate // batch_size,
+              validation_steps = len(validate_gen),
               verbose = 1,
               shuffle = True,
               epochs = 10,

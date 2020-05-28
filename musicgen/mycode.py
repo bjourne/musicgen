@@ -171,7 +171,7 @@ def mod_file_to_mycode(file_path, do_pack):
     all_notes = flatten(col_notes)
     instruments = {}
     n_perc = 0
-    for sample_idx, props in sample_props(mod, all_notes):
+    for sample_idx, props in sample_props(mod, all_notes).items():
         if not props.is_percussive:
             instruments[sample_idx] = 1
         else:

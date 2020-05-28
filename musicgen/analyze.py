@@ -116,7 +116,6 @@ def notes_to_analyze_notes(samples, notes):
 
         # Compute ringout duration
         freq = FREQS[n.pitch_idx]
-
         n_orig = len(samples[n.sample_idx - 1].bytes)
 
         # Should be in ms?
@@ -127,9 +126,8 @@ def notes_to_analyze_notes(samples, notes):
 def sample_props(mod, notes):
     analyze_notes = notes_to_analyze_notes(mod.samples, notes)
     grouped = sort_groupby(analyze_notes, lambda n: n.sample_idx)
-    grouped = [(sample, get_sample_props(mod, sample, list(group)))
-               for (sample, group) in grouped]
-    return grouped
+    return {sample : get_sample_props(mod, sample, list(group))
+            for (sample, group) in grouped}
 
 def main():
     from argparse import ArgumentParser, FileType
