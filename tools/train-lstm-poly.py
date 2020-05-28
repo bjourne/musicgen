@@ -10,6 +10,7 @@ Options:
     --win-size=<int>       window size [default: 64]
     --kb-limit=<int>       kb limit [default: 150]
     --fraction=<float>     fraction of corpus to use [default: 1.0]
+    --relative-pitches     use pcode with relative pitches
 """
 from collections import Counter
 from docopt import docopt
@@ -41,6 +42,7 @@ PCODE_MIDI_MAPPING = {
 }
 
 INSN_PITCH = 'P'
+INSN_REL_PITCH = 'R'
 INSN_SILENCE = 'S'
 INSN_DRUM = 'D'
 INSN_PROGRAM = 'X'
@@ -57,19 +59,34 @@ def pcode_to_string(pcode):
         return '%s%s' % (cmd, arg)
     return ' '.join(insn_to_string(insn) for insn in pcode)
 
+def guess_initial_pitch(pcode):
+    diffs = [arg for (cmd, arg) in pcode if cmd == INSN_REL_PITCH]
+    at_pitch, max_pitch, min_pitch = 0, 0, 0
+    for diff in diffs:
+        at_pitch += diff
+        max_pitch = max(at_pitch, max_pitch)
+        min_pitch = min(at_pitch, min_pitch)
+    return -min_pitch
+
 def pcode_to_midi_file(pcode, file_path, relative_pitches):
+    if relative_pitches:
+        at_pitch = guess_initial_pitch(pcode)
     notes = []
     at = 0
     for cmd, arg in pcode:
         ri = at // 4
         ci = at % 4
-        if cmd in (INSN_PITCH, INSN_DRUM):
+        if cmd in (INSN_PITCH, INSN_REL_PITCH, INSN_DRUM):
             if cmd == INSN_DRUM:
                 sample_idx = arg + 1
                 pitch_idx = 36
-            elif cmd == INSN_PITCH:
+            else:
                 sample_idx = 4
-                pitch_idx = arg
+                if cmd == INSN_PITCH:
+                    pitch_idx = arg
+                else:
+                    at_pitch += arg
+                    pitch_idx = at_pitch
             note = ModNote(ri, ci, sample_idx, pitch_idx, 48, 120)
             notes.append(note)
             at += 1
@@ -127,8 +144,23 @@ def mod_file_to_pcode(file_path, relative_pitches):
         if si in percussion:
             return at, True, percussion[si]
         return at, False, n.pitch_idx - min_pitch,
-
     notes = sorted([note_to_event(n) for n in notes])
+
+    if relative_pitches:
+        # Make pitches relative
+        current_pitch = None
+        notes2 = []
+        for at, is_drum, pitch in notes:
+            if is_drum:
+                notes2.append((at, True, pitch))
+            else:
+                if current_pitch is None:
+                    notes2.append((at, False, 0))
+                else:
+                    notes2.append((at, False, pitch - current_pitch))
+                current_pitch = pitch
+        notes = notes2
+
 
     def produce_silence(delta):
         thresholds = [16, 8, 4, 3, 2, 1]
@@ -138,46 +170,53 @@ def mod_file_to_pcode(file_path, relative_pitches):
                 delta -= threshold
         assert delta >= -1
 
+    # Begin with pad token
+    yield PAD_TOKEN
+
     at = 0
     last_pitch = None
     for ofs, is_drum, arg in notes:
         delta = ofs - at
         for sil in produce_silence(delta - 1):
             yield INSN_SILENCE, sil
-        yield INSN_DRUM if is_drum else INSN_PITCH, arg
+        if is_drum:
+            yield INSN_DRUM, arg
+        elif relative_pitches:
+            yield INSN_REL_PITCH, arg
+        else:
+            yield INSN_PITCH, arg
         at = ofs
     SP.leave()
 
 ########################################################################
 # Test encode and decode
 ########################################################################
-def test_encode_decode(mod_file):
-    pcode = list(mod_file_to_pcode(mod_file, False))
-    pcode_to_midi_file(pcode, 'test.mid', False)
+def test_encode_decode(mod_file, relative_pitches):
+    pcode = list(mod_file_to_pcode(mod_file, relative_pitches))
+    pcode_to_midi_file(pcode, 'test.mid', relative_pitches)
 
 ########################################################################
 # Cache loading
 ########################################################################
-def load_data_from_disk(corpus_path, mods, win_size):
+def load_data_from_disk(corpus_path, mods, relative_pitches):
     file_paths = [corpus_path / mod.genre / mod.fname for mod in mods]
-    pcodes = [mod_file_to_pcode(fp, False) for fp in file_paths]
-    pcodes = [[PAD_TOKEN] + list(pc) for pc in pcodes if pc]
+    pcodes = [mod_file_to_pcode(fp, relative_pitches)
+              for fp in file_paths]
     shuffle(pcodes)
     return flatten(pcodes)
 
-def load_data(corpus_path, kb_limit, win_size):
+def load_data(corpus_path, kb_limit, relative_pitches):
     index = load_index(corpus_path)
     mods = [mod for mod in index.values()
             if (mod.n_channels == 4
                 and mod.format == 'MOD'
-                and mod.kb_size <= kb_limit)][:2]
+                and mod.kb_size <= kb_limit)]
     size_sum = sum(mod.kb_size for mod in mods)
-    params = (size_sum, kb_limit, win_size)
+    params = (size_sum, kb_limit, relative_pitches)
     cache_file = file_name_for_params('cache_poly', 'pickle', params)
     cache_path = corpus_path / cache_file
     if not cache_path.exists():
-        seq = load_data_from_disk(corpus_path, mods, win_size)
-        print(seq)
+        seq = load_data_from_disk(corpus_path, mods, relative_pitches)
         save_pickle(cache_path, seq)
     return load_pickle(cache_path)
 
@@ -236,7 +275,8 @@ class DataGen(Sequence):
 ########################################################################
 def generate_midi_files(model, epoch, seq,
                         vocab_size, win_size,
-                        char2idx, idx2char, corpus_path):
+                        char2idx, idx2char, corpus_path,
+                        relative_pitches):
     SP.header('EPOCH', '%d', epoch)
     # Pick a seed that doesn't contain the break token.
     pad_int = char2idx[PAD_TOKEN]
@@ -261,7 +301,7 @@ def generate_midi_files(model, epoch, seq,
         SP.print(pcode_to_string(seq))
         file_name = 'pcode-%03d-%s.mid' % (epoch, temp_str)
         file_path = corpus_path / file_name
-        pcode_to_midi_file(seq, file_path)
+        pcode_to_midi_file(seq, file_path, relative_pitches)
         SP.leave()
     SP.leave()
 
@@ -276,12 +316,18 @@ def main():
     kb_limit = int(args['--kb-limit'])
     corpus_path = Path(args['<corpus-path>'])
     win_size = int(args['--win-size'])
+    relative_pitches = args['--relative-pitches']
 
-    test_encode_decode(corpus_path)
-    return
+    # test_encode_decode(corpus_path, relative_pitches)
+    # return
 
     # Load dataset
-    dataset = load_data(corpus_path, kb_limit, win_size)
+    if corpus_path.is_dir():
+        dataset = load_data(corpus_path, kb_limit, relative_pitches)
+        output_dir = corpus_path
+    else:
+        dataset = list(mod_file_to_pcode(corpus_path, relative_pitches))
+        output_dir = Path('.')
     n_dataset = len(dataset)
     analyze_pcode(dataset)
 
@@ -309,7 +355,7 @@ def main():
 
     params = (win_size, n_train, n_validate)
     weights_file = file_name_for_params('weights_poly', 'hdf5', params)
-    weights_path = corpus_path / weights_file
+    weights_path = output_dir / weights_file
     if weights_path.exists():
         SP.print(f'Loading weights from {weights_path}.')
         model.load_weights(weights_path)
@@ -321,11 +367,11 @@ def main():
     train_gen = DataGen(train, batch_size, win_size, vocab_size)
     validate_gen = DataGen(validate, batch_size, win_size, vocab_size)
 
-    def on_epoch_begin(model, epoch):
-        pass
-        # generate_midi_files(model, epoch, test,
-        #                     vocab_size, win_size,
-        #                     char2idx, idx2char, corpus_path)
+    def on_epoch_begin(epoch, logs):
+        generate_midi_files(model, epoch, test,
+                            vocab_size, win_size,
+                            char2idx, idx2char, output_dir,
+                            relative_pitches)
     cb_checkpoint = ModelCheckpoint(
         str(weights_path),
         monitor = 'val_loss',
