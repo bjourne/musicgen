@@ -43,14 +43,15 @@ def upload_files(connection, files):
         connection.put(str(src), str(dst))
     SP.leave()
 
-
 def upload_code(connection):
     dirs = [Path(d) for d in ['musicgen', 'tools']]
     files = flatten([[(src, d) for src in d.glob('*.py')] for d in dirs])
     upload_files(connection, files)
 
 def upload_caches(connection, corpus_path):
-    caches = corpus_path.glob('*.pickle')
+    caches = [corpus_path.glob(f'*.{ext}') for ext in ['pickle', 'npy']]
+    caches = flatten(caches) + [corpus_path / 'index']
+    print(caches)
     files = [(c, c.name) for c in caches]
     upload_files(connection, files)
 
@@ -58,7 +59,7 @@ def run_training(connection, root_path):
     cmds = ['pip3 install mido construct',
             f'cd "{root_path}"',
             'export PYTHONPATH="."',
-            'python3 tools/train-model.py -v .'
+            'python3 tools/train-lstm.py -v . --pack-mycode'
             ]
     script = ' && '.join(cmds)
     connection.run(script, pty = True)
