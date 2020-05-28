@@ -51,7 +51,6 @@ def upload_code(connection):
 def upload_caches(connection, corpus_path):
     caches = [corpus_path.glob(f'*.{ext}') for ext in ['pickle', 'npy']]
     caches = flatten(caches) + [corpus_path / 'index']
-    print(caches)
     files = [(c, c.name) for c in caches]
     upload_files(connection, files)
 

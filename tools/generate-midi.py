@@ -33,7 +33,7 @@ from musicgen.mycode import (INSN_JUMP,
                              mod_file_to_mycode)
 from musicgen.parser import load_file
 from musicgen.rows import linearize_rows, rows_to_mod_notes
-from musicgen.utils import SP, load_pickle
+from musicgen.utils import SP, flatten, load_pickle
 from pathlib import Path
 from random import randrange
 
@@ -42,7 +42,7 @@ def mod_file_to_midi_file(mod_file, midi_file,
     mod = load_file(mod_file)
     rows = linearize_rows(mod)
 
-    # Get volumes
+    # Get notes
     volumes = [header.volume for header in mod.sample_headers]
     notes = rows_to_mod_notes(rows, volumes)
 
@@ -50,7 +50,7 @@ def mod_file_to_midi_file(mod_file, midi_file,
     if midi_mapping == 'auto':
         props = sample_props(mod, notes)
         samples = [(sample_idx, props.is_percussive, props.note_duration)
-                   for (sample_idx, props) in props]
+                   for (sample_idx, props) in props.items()]
         midi_mapping = assign_instruments(samples, programs)
 
     notes_to_midi_file(notes, midi_file, midi_mapping)
@@ -59,10 +59,11 @@ def mod_file_to_midi_file_using_mycode(mod_file, midi_file):
     # Can't use packing here since it is not exact.
     mycode = mod_file_to_mycode(mod_file, False)
     time_ms = mycode.time_ms
+    SP.print('Rowtime %d ms.' % time_ms)
     notes = [mycode_to_mod_notes(seq, i, time_ms, pitch_idx, None)
              for i, (pitch_idx, seq)
              in enumerate(mycode.cols)]
-    notes = sum(notes, [])
+    notes = flatten(notes)
     notes_to_midi_file(notes, midi_file, MYCODE_MIDI_MAPPING)
 
 def random_cache_location(mycode_mods, n_insns):
@@ -109,13 +110,14 @@ def main():
     args = docopt(__doc__, version = 'MIDI file generator 1.0')
     SP.enabled = args['--verbose']
 
+    # Parse
     mod_file = args['<mod>']
-    mod_file = Path(mod_file) if mod_file else None
-
     cache_file = args['<cache>']
     midi_file = args['--output']
     programs = parse_programs(args['--programs'])
+
     if mod_file:
+        mod_file = Path(mod_file)
         if args['--use-mycode']:
             mod_file_to_midi_file_using_mycode(mod_file, midi_file)
         else:

@@ -250,7 +250,7 @@ def main():
         print(fmt % args.input_module.name)
         exit(1)
 
-    cells = sum(melodies, [])
+    cells = flatten(melodies)
     rows = [[c, ZERO_CELL, ZERO_CELL, ZERO_CELL] for c in cells]
 
     patterns = list(rows_to_patterns(rows))
