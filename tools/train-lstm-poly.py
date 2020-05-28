@@ -40,7 +40,6 @@ PCODE_MIDI_MAPPING = {
     4 : [1, 48, 4, 1.0]
 }
 
-# INSN_REL_PITCH = 'R'
 INSN_PITCH = 'P'
 INSN_SILENCE = 'S'
 INSN_DRUM = 'D'
@@ -50,18 +49,15 @@ PAD_TOKEN = (INSN_PROGRAM, 0)
 ########################################################################
 # Encode/Decode
 ########################################################################
-# def guess_initial_pitch(pcode):
-#     diffs = [arg for (cmd, arg) in pcode if cmd == INSN_REL_PITCH]
-#     at_pitch, max_pitch, min_pitch = 0, 0, 0
-#     for diff in diffs:
-#         at_pitch += diff
-#         max_pitch = max(at_pitch, max_pitch)
-#         min_pitch = min(at_pitch, min_pitch)
-#     return -min_pitch
+def pcode_to_string(pcode):
+    def insn_to_string(insn):
+        cmd, arg = insn
+        if cmd == INSN_PITCH:
+            return '%02d' % arg
+        return '%s%s' % (cmd, arg)
+    return ' '.join(insn_to_string(insn) for insn in pcode)
 
 def pcode_to_midi_file(pcode, file_path, relative_pitches):
-    # if relative_pitches:
-    #     at_pitch = guess_initial_pitch(pcode)
     notes = []
     at = 0
     for cmd, arg in pcode:
@@ -74,16 +70,11 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
             elif cmd == INSN_PITCH:
                 sample_idx = 4
                 pitch_idx = arg
-            else:
-                at_pitch += arg
-                sample_idx = 4
-                pitch_idx = at_pitch
-            note = ModNote(ri, ci, sample_idx, pitch_idx, 48, 60)
+            note = ModNote(ri, ci, sample_idx, pitch_idx, 48, 120)
             notes.append(note)
             at += 1
         else:
             at += arg
-    #print(notes)
 
     # Fix durations
     cols = sort_groupby(notes, lambda n: n.col_idx)
@@ -139,42 +130,21 @@ def mod_file_to_pcode(file_path, relative_pitches):
 
     notes = sorted([note_to_event(n) for n in notes])
 
-    if relative_pitches:
-        # Make pitches relative
-        current_pitch = None
-        notes2 = []
-        for at, is_drum, pitch in notes:
-            if is_drum:
-                notes2.append((at, True, pitch))
-            else:
-                if current_pitch is None:
-                    notes2.append((at, False, 0))
-                else:
-                    notes2.append((at, False, pitch - current_pitch))
-                current_pitch = pitch
-        notes = notes2
-
     def produce_silence(delta):
         thresholds = [16, 8, 4, 3, 2, 1]
         for threshold in thresholds:
             while delta >= threshold:
                 yield threshold
                 delta -= threshold
-        assert delta == 0
+        assert delta >= -1
 
     at = 0
     last_pitch = None
     for ofs, is_drum, arg in notes:
         delta = ofs - at
-        for sil in produce_silence(delta):
+        for sil in produce_silence(delta - 1):
             yield INSN_SILENCE, sil
-        if is_drum:
-            op = INSN_DRUM
-        # elif relative_pitches:
-        #     op = INSN_REL_PITCH
-        else:
-            op = INSN_PITCH
-        yield op, arg
+        yield INSN_DRUM if is_drum else INSN_PITCH, arg
         at = ofs
     SP.leave()
 
@@ -184,7 +154,6 @@ def mod_file_to_pcode(file_path, relative_pitches):
 def test_encode_decode(mod_file):
     pcode = list(mod_file_to_pcode(mod_file, False))
     pcode_to_midi_file(pcode, 'test.mid', False)
-
 
 ########################################################################
 # Cache loading
@@ -229,9 +198,6 @@ def make_model(seq_len, vocab_size):
                   optimizer = 'rmsprop',
                   metrics = ['accuracy'])
     print(model.summary())
-    # Adam: 0.4790 after 10 gens
-    # Rmsprop: 0.5138
-    # Rmsprop+embedding: 0.4921
     return model
 
 ########################################################################
@@ -268,14 +234,6 @@ class DataGen(Sequence):
 ########################################################################
 # Generation
 ########################################################################
-def pcode_to_string(pcode):
-    def insn_to_string(insn):
-        cmd, arg = insn
-        if cmd == INSN_PITCH:
-            return '%02d' % arg
-        return '%s%s' % (cmd, arg)
-    return ' '.join(insn_to_string(insn) for insn in pcode)
-
 def generate_midi_files(model, epoch, seq,
                         vocab_size, win_size,
                         char2idx, idx2char, corpus_path):
