@@ -1,54 +1,43 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # I couldn't get the torrents working. Hence this tool.
-from argparse import ArgumentParser, FileType
+"""The Mod Archive download tool
+
+Usage:
+    manage-corpus.py [-hv] download <corpus-path>
+        [--format=<s> --kb-limit=<i>]
+    manage-corpus.py [-hv] update-index <corpus-path>
+        ( --genre-id=<i> | --random=<i> | --module-id=<i> )
+
+Options:
+    -h --help              show this screen
+    -v --verbose           print more output
+    --format=<s>           format selection; AHX, IT, MOD, S3M or XM
+    --kb-limit=<kb>        only download song smaller than the specified
+                           size in kb [default: 150]
+    --genre-id=<i>         The Mod Archive genre id to scrape
+    --module-id=<i>        The Mod Archive module id to scrape
+    --random=<i>           Number of random modules to scrape
+"""
+from docopt import docopt
 from pathlib import Path
 from musicgen.corpus import *
 from musicgen.utils import SP
 
 def main():
-    parser = ArgumentParser(description = 'Bulk MOD downloader')
-    parser.add_argument(
-        '--corpus-path', required = True,
-        help = 'Path to corpus')
-    parser.add_argument(
-        '--info', action = 'store_true',
-        help = 'Print information')
+    args = docopt(__doc__, version = 'The Mod Archive download tool 1.0')
+    SP.enabled = args['--verbose']
 
-    subparser = parser.add_subparsers(dest = 'subparser', required = True)
-    sync_index = subparser.add_parser('update-index')
-    group = sync_index.add_mutually_exclusive_group(required = True)
-    group.add_argument(
-        '--genre-id', type = int,
-        help = 'The Mod Archive genre id')
-    group.add_argument(
-        '--module-id', type = int,
-        help = 'The Mod Archive module id')
-    group.add_argument(
-        '--random', type = int,
-        help = 'Random module from The Mod Archive')
-
-    download = subparser.add_parser('download')
-    download.add_argument(
-        '--max-size', type = int,
-        default = 150,
-        help = 'Only download mods smaller than specified size (in KB)')
-    formats = ['AHX', 'IT', 'MOD', 'S3M', 'XM']
-    download.add_argument(
-        '--format', choices = formats)
-
-    args = parser.parse_args()
-
-    SP.enabled = args.info
-    corpus_path = Path(args.corpus_path)
+    corpus_path = Path(args['<corpus-path>'])
     corpus_path.mkdir(parents = True, exist_ok = True)
 
-    cmd = args.subparser
-    if cmd == 'update-index':
-        genre_id = args.genre_id
-        module_id = args.module_id
-        n_random = args.random
-
+    if args['download']:
+        kb_limit = int(args['--kb-limit'])
+        download_mods(corpus_path, args['--format'], kb_limit)
+    elif args['update-index']:
+        genre_id = args['--genre-id']
+        n_random = args['--random']
+        module_id = args['--module-id']
         index = load_index(corpus_path)
         if genre_id is not None:
             SP.header('GENRE', '%d', genre_id)
@@ -68,8 +57,6 @@ def main():
         for mod in mods:
             index[mod.id] = mod
         save_index(corpus_path, index)
-    elif cmd == 'download':
-        download_mods(corpus_path, args.format, args.max_size)
 
 if __name__ == '__main__':
     main()

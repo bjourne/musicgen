@@ -1,7 +1,7 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # I couldn't get the torrents working. Hence this tool.
-from collections import defaultdict
+from collections import Counter, defaultdict
 from lxml import html
 from musicgen.utils import SP
 from requests import get
@@ -213,36 +213,41 @@ def modules_for_genre(genre_id):
                 for page_id in page_indices], [])
 
 def download_mods(corpus_path, selected_format, max_size):
-    url_fmt = 'https://api.modarchive.org/downloads.php?moduleid=%d'
     index = load_index(corpus_path)
-    tally = defaultdict(int)
-    new_mods = []
-    for mod in index.values():
-        fname = mod.fname
-        format = mod.format
+    def local_path(mod):
+        return corpus_path / mod.genre / mod.fname
 
-        genre_path = corpus_path / mod.genre
-        genre_path.mkdir(parents = True, exist_ok = True)
-        local_path = genre_path / fname
-
-        if selected_format and selected_format != format:
-            tally['format'] += 1
-        elif local_path.exists():
-            tally['exists'] += 1
+    def classify_indexed_mod(mod):
+        if selected_format and selected_format != mod.format:
+            return 'format'
+        elif local_path(mod).exists():
+            return 'exists'
         elif max_size and mod.kb_size > max_size:
-            tally['size'] += 1
+            return 'size'
         else:
-            url = url_fmt % mod.id
-            with open(local_path, 'wb') as f:
-                f.write(get_url(url, 0.4).content)
-            new_mods.append(mod)
-    SP.header('%d DOWNLOADS' % len(new_mods))
+            return 'download'
+
+    mods = index.values()
+    mod_classes = {m : classify_indexed_mod(m) for m in mods}
+
+    tally = Counter(mod_classes.values())
+    n_skips = tally['exists'] + tally['size'] + tally['format']
+    SP.header('%d SKIPS' % n_skips)
+    SP.print('Exists       : %5d' % tally['exists'])
+    SP.print('Over max size: %5d' % tally['size'])
+    SP.print('Wrong format : %5d' % tally['format'])
+    SP.leave()
+
+    SP.header('%d DOWNLOADS' % tally['download'])
+    new_mods = {m for m in mods if mod_classes[m] == 'download'}
     for mod in new_mods:
         SP.print(short_line(mod))
-    SP.leave()
-    tot_skips = tally['exists'] + tally['size'] + tally['format']
-    SP.header('%d SKIPS' % tot_skips)
-    SP.print('Exists       : %4d' % tally['exists'])
-    SP.print('Over max size: %4d' % tally['size'])
-    SP.print('Wrong format : %4d' % tally['format'])
+
+    url_fmt = 'https://api.modarchive.org/downloads.php?moduleid=%d'
+    for mod in new_mods:
+        path = local_path(mod)
+        path.parent.mkdir(parents = True, exist_ok = True)
+        url = url_fmt % mod.id
+        with open(local_path, 'wb') as f:
+            f.write(get_url(url, 0.4).content)
     SP.leave()
