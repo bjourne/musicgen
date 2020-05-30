@@ -73,6 +73,7 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
     SP.header('WRITING %s' % file_path)
     if relative_pitches:
         at_pitch = guess_initial_pitch(pcode)
+
     notes = []
     at = 0
     for cmd, arg in pcode:
@@ -302,27 +303,27 @@ def generate_midi_files(model, epoch, seq,
                         relative_pitches):
     SP.header('EPOCH', '%d', epoch)
     # Pick a seed that doesn't contain the break token.
-    pad_int = char2idx[PAD_TOKEN]
+    eos = char2idx[PAD_TOKEN]
     while True:
         idx = randrange(len(seq) - win_size)
         seed = np.array(seq[idx:idx + win_size])
-        if not pad_int in seed:
+        if not eos in seed:
             break
     join_seq = [char2idx[(INSN_SILENCE, 8)]] * 4
 
     i = randrange(len(seq) - win_size)
-    seed = np.array(seq[i:i + win_size])
-    temps = [None, 0.5, 0.8, 1.0, 1.2, 1.5]
+    seed = list(seq[i:i + win_size])
+    S = to_categorical(seed, vocab_size)
+    temps = [0.5, 0.8, 1.0, 1.2, 1.5]
     for temp in temps:
-        seq = list(generate_sequence(model, vocab_size, seed, 300,
-                                     temp, pad_int))
-        seq = seed.tolist() + join_seq + seq
+        SP.header('TEMPERATURE %.2f' % temp)
+        log_lh, seq = generate_sequence(model, S, 300, temp, eos)
+
+        seq = seed + join_seq + seq
         seq = [idx2char[i] for i in seq]
-        fmt = '%s' if temp is None else '%.2f'
-        temp_str = fmt % temp
-        SP.header('TEMPERATURE %s' % temp_str)
+        SP.print('logLH: %.4f', log_lh)
         SP.print(pcode_to_string(seq))
-        file_name = 'pcode-%03d-%s.mid' % (epoch, temp_str)
+        file_name = 'pcode-%03d-%.2f.mid' % (epoch, temp)
         file_path = corpus_path / file_name
         pcode_to_midi_file(seq, file_path, relative_pitches)
         SP.leave()

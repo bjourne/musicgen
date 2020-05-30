@@ -4,7 +4,7 @@ from keras.layers import (Activation, BatchNormalization, Dense, Dropout,
                           LSTM)
 from keras.models import Sequential
 from keras.optimizers import RMSprop
-from keras.utils import Sequence, to_categorical
+from keras.utils import Sequence
 from musicgen.keras_utils import OneHotGenerator
 from musicgen.utils import SP
 import numpy as np
@@ -24,8 +24,10 @@ def make_model(seq_len, n_chars):
     print(model.summary())
     return model
 
-def generate_sequence(model, vocab_size, seed, seq_len, temp, eos):
-    X = np.expand_dims(to_categorical(seed, vocab_size), axis = 0)
+def generate_sequence(model, S, seq_len, temp, eos):
+    X = np.expand_dims(S, axis = 0)
+    seq = []
+    log_lh = 0.0
     for _ in range(seq_len):
         P = model.predict(X, verbose = 0)[0]
 
@@ -33,18 +35,23 @@ def generate_sequence(model, vocab_size, seed, seq_len, temp, eos):
         P = P.astype(np.float64)
 
         # Reweigh probabilities according to temperature.
-        P = np.log(P) / temp
-        exp_P = np.exp(P)
-        P = exp_P / np.sum(exp_P)
+        P = np.exp(np.log(P) / temp)
 
         # To avoid picking the end of sequence token
         P[eos] = 0.0
 
+        # Renormalize
+        P = P / np.sum(P)
+
         # Faster than np.random.choice
-        Y = np.random.multinomial(1, P, 1)
-        yield np.argmax(Y)
+        Y = np.random.multinomial(1, P, 1)[0]
         X = np.roll(X, -1, axis = 1)
         X[0, -1] = Y
+
+        idx = np.argmax(Y)
+        seq.append(idx)
+        log_lh += np.log(P[idx])
+    return log_lh, seq
 
 def train_model(train, validate,
                 weights_path, vocab_size,
