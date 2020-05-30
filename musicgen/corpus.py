@@ -4,6 +4,7 @@
 from collections import Counter, defaultdict
 from lxml import html
 from musicgen.utils import SP
+from re import sub
 from requests import get
 from sys import exit
 from time import sleep
@@ -29,11 +30,9 @@ def parse_mod_stats(el):
     return {k : v for [k, v] in keyvals}
 
 def clean_genre(str):
-    str = str.replace('(', '').replace(')', '')
-    toks = str.lower().split()
-    toks = [t for t in toks if t != '-']
-    genre = '-'.join(toks)
-    return 'uncategorized' if genre == 'n/a' else genre
+    str = sub(r'\W', ' ', str.lower())
+    genre = '-'.join(str.split())
+    return 'uncategorized' if genre == 'n-a' else genre
 
 class IndexedModule:
     URL_SITE = 'https://modarchive.org'
@@ -100,48 +99,7 @@ class IndexedModule:
         url_fmt = 'https://modarchive.org' \
             '/index.php?request=view_by_moduleid&query=%d'
         url = url_fmt % id
-        root = get_and_parse_url(url)
-
-        # Parse file name
-        fname = root.xpath('//h1[1]/span/text()')[0][1:-1]
-
-        # Parse other metadata
-        ul_el = root.xpath('//div[@class="mod-page-archive-info"]'
-                           '/ul[@class="nolist"]')[1]
-        stats = parse_mod_stats(ul_el)
-
-        id = int(stats['Mod Archive ID'])
-        n_channels = int(stats['Channels'])
-        n_downloads = int(stats['Downloads'])
-        format = stats['Format']
-        kb_size = round(float(stats['Uncompressed Size'][:-2]))
-
-        genre = clean_genre(stats['Genre'])
-
-        # Upload year
-        year = root.xpath(
-            '//div[@class="mod-page-archive-info"]'
-            '/ul/li[@class="stats"]/text()[last()]')[0]
-        year = int(year.split()[-2])
-
-        # Ratings
-        els = root.xpath('//div[@class="mod-page-ratings"]/ul/li/text()')
-        member_rating = els[1].strip()[1:-1]
-        if member_rating == 'Unrated':
-            member_rating = '?'
-        else:
-            member_rating = int(member_rating.split('/')[0].strip())
-
-        reviewer_rating = els[3].strip()[1:-1]
-        if reviewer_rating == 'Unrated':
-            reviewer_rating = '?'
-        else:
-            print('Reviewer rating', reviewer_rating)
-            reviewer_rating = int(reviewer_rating)
-
-        return IndexedModule(fname, id, format, kb_size,
-                             n_channels, genre, year, n_downloads,
-                             member_rating, reviewer_rating)
+        return cls.from_modarchive_url(url)
 
     def __init__(self, fname, id, format, kb_size,
                  n_channels, genre, year, n_downloads,
@@ -245,9 +203,9 @@ def download_mods(corpus_path, selected_format, max_size):
 
     url_fmt = 'https://api.modarchive.org/downloads.php?moduleid=%d'
     for mod in new_mods:
-        path = local_path(mod)
-        path.parent.mkdir(parents = True, exist_ok = True)
+        file_path = local_path(mod)
+        file_path.parent.mkdir(parents = True, exist_ok = True)
         url = url_fmt % mod.id
-        with open(local_path, 'wb') as f:
+        with open(file_path, 'wb') as f:
             f.write(get_url(url, 0.4).content)
     SP.leave()
