@@ -7,7 +7,6 @@ from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
 from musicgen.keras_utils import OneHotGenerator
 from musicgen.utils import SP
-from random import choice
 import numpy as np
 
 def make_model(seq_len, n_chars):
@@ -25,29 +24,27 @@ def make_model(seq_len, n_chars):
     print(model.summary())
     return model
 
-def weighted_sample(probs, temperature):
-    probs = np.array(probs).astype('float64')
-    probs = np.log(probs) / temperature
-    exp_probs = np.exp(probs)
-    probs = exp_probs / np.sum(exp_probs)
-    probas = np.random.multinomial(1, probs, 1)
-    return np.argmax(probas)
-
-def generate_sequence(model, vocab_size, seed, seq_len, temp, pad_int):
+def generate_sequence(model, vocab_size, seed, seq_len, temp, eos):
+    X = np.expand_dims(to_categorical(seed, vocab_size), axis = 0)
     for _ in range(seq_len):
-        X = np.zeros((1, seed.size, vocab_size), dtype = np.int)
-        X[0, np.arange(seed.size), seed] = 1
         P = model.predict(X, verbose = 0)[0]
-        while True:
-            if temp is None:
-                idx = np.random.choice(len(P), p = P)
-            else:
-                idx = weighted_sample(P, temp)
-            if idx != pad_int:
-                break
-        yield idx
-        seed = np.roll(seed, -1)
-        seed[-1] = idx
+
+        # Extra precision needed to ensure np.sum(P) == 1.0.
+        P = P.astype(np.float64)
+
+        # Reweigh probabilities according to temperature.
+        P = np.log(P) / temp
+        exp_P = np.exp(P)
+        P = exp_P / np.sum(exp_P)
+
+        # To avoid picking the end of sequence token
+        P[eos] = 0.0
+
+        # Faster than np.random.choice
+        Y = np.random.multinomial(1, P, 1)
+        yield np.argmax(Y)
+        X = np.roll(X, -1, axis = 1)
+        X[0, -1] = Y
 
 def train_model(train, validate,
                 weights_path, vocab_size,
