@@ -34,10 +34,11 @@ from pathlib import Path
 from random import randrange, shuffle
 import numpy as np
 
+# This order works best for zodiak_-_gasp.mod
 PCODE_MIDI_MAPPING = {
     1 : [-1, 40, 4, 1.0],
-    2 : [-1, 31, 4, 1.0],
-    3 : [-1, 36, 4, 1.0],
+    2 : [-1, 36, 4, 1.0],
+    3 : [-1, 31, 4, 1.0],
     4 : [1, 48, 4, 1.0]
 }
 
@@ -69,6 +70,7 @@ def guess_initial_pitch(pcode):
     return -min_pitch
 
 def pcode_to_midi_file(pcode, file_path, relative_pitches):
+    SP.header('WRITING %s' % file_path)
     if relative_pitches:
         at_pitch = guess_initial_pitch(pcode)
     notes = []
@@ -87,11 +89,21 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
                 else:
                     at_pitch += arg
                     pitch_idx = at_pitch
-            note = ModNote(ri, ci, sample_idx, pitch_idx, 48, 120)
+            note = ModNote(ri, ci, sample_idx, pitch_idx, 48, -1)
             notes.append(note)
             at += 1
         else:
             at += arg
+
+    # Guess and set row time
+    row_indices = {n.row_idx for n in notes}
+    max_row = max(row_indices)
+    row_time_ms = int(160 * len(row_indices) / max_row)
+    for n in notes:
+        n.time_ms = row_time_ms
+
+    fmt = 'Rel pitches: %s, guessed row time: %s.'
+    SP.print(fmt % (relative_pitches, row_time_ms))
 
     # Fix durations
     cols = sort_groupby(notes, lambda n: n.col_idx)
@@ -104,9 +116,22 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
             row_in_page = last_note.row_idx % 64
             last_note.duration = min(64 - row_in_page, 16)
     notes_to_midi_file(notes, file_path, PCODE_MIDI_MAPPING)
+    SP.leave()
+
+def guess_percussive_instruments(mod, notes):
+    props = sample_props(mod, notes)
+    props = [(s, p.n_notes, p.is_percussive) for (s, p) in props.items()
+             if p.is_percussive]
+
+    # Sort by the number of notes so that the same instrument
+    # assignment is generated every time.
+    props = list(reversed(sorted(props, key = lambda x: x[1])))
+    percussive_samples = [s for (s, _, _) in props]
+
+    return {s : i % 3 for i, s in enumerate(percussive_samples)}
 
 def mod_file_to_pcode(file_path, relative_pitches):
-    SP.header('PARSING %s' % str(file_path))
+    SP.header('READING %s' % file_path)
     try:
         mod = load_file(file_path)
     except PowerPackerModule:
@@ -117,12 +142,10 @@ def mod_file_to_pcode(file_path, relative_pitches):
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = rows_to_mod_notes(rows, volumes)
-    props = sample_props(mod, notes)
 
-    # Assign instruments to percussive samples.
-    percussive_samples = {s for s in props if props[s].is_percussive}
-    percussion = {s : i % 3 for i, s in enumerate(percussive_samples)}
-    SP.print('Percussion: %s.' % percussion)
+    percussion = guess_percussive_instruments(mod, notes)
+    fmt = 'Row time %d ms, guessed percussion: %s.'
+    SP.print(fmt % (notes[0].time_ms, percussion))
 
     pitches = {n.pitch_idx for n in notes
                if n.sample_idx not in percussion}
@@ -160,7 +183,6 @@ def mod_file_to_pcode(file_path, relative_pitches):
                     notes2.append((at, False, pitch - current_pitch))
                 current_pitch = pitch
         notes = notes2
-
 
     def produce_silence(delta):
         thresholds = [16, 8, 4, 3, 2, 1]
@@ -216,6 +238,7 @@ def load_data(corpus_path, kb_limit, relative_pitches):
     cache_file = file_name_for_params('cache_poly', 'pickle', params)
     cache_path = corpus_path / cache_file
     if not cache_path.exists():
+        SP.print('Cache file %s not found.' % cache_file)
         seq = load_data_from_disk(corpus_path, mods, relative_pitches)
         save_pickle(cache_path, seq)
     return load_pickle(cache_path)
@@ -224,7 +247,7 @@ def load_data(corpus_path, kb_limit, relative_pitches):
 # Model definition
 ########################################################################
 def make_model(seq_len, vocab_size):
-    '''Check if an Embedding layer is worthwhile.'''
+    # Check if an Embedding layer is worthwhile.
     model = Sequential()
     model.add(LSTM(128, return_sequences = True,
                    input_shape = (seq_len, vocab_size)))
@@ -289,7 +312,7 @@ def generate_midi_files(model, epoch, seq,
 
     i = randrange(len(seq) - win_size)
     seed = np.array(seq[i:i + win_size])
-    temps = [None, 0.2, 0.5, 1.0, 1.2, 1.5]
+    temps = [None, 0.5, 0.8, 1.0, 1.2, 1.5]
     for temp in temps:
         seq = list(generate_sequence(model, vocab_size, seed, 300,
                                      temp, pad_int))
@@ -308,7 +331,7 @@ def generate_midi_files(model, epoch, seq,
 def analyze_pcode(pcode):
     counts = Counter(pcode)
     for (cmd, arg), cnt in sorted(counts.items()):
-        print('%s %3d %10d' % (cmd, arg, cnt))
+        SP.print('%s %3d %10d' % (cmd, arg, cnt))
 
 def main():
     args = docopt(__doc__, version = 'Train Poly LSTM 1.0')
@@ -317,9 +340,6 @@ def main():
     corpus_path = Path(args['<corpus-path>'])
     win_size = int(args['--win-size'])
     relative_pitches = args['--relative-pitches']
-
-    # test_encode_decode(corpus_path, relative_pitches)
-    # return
 
     # Load dataset
     if corpus_path.is_dir():
@@ -350,10 +370,15 @@ def main():
     fmt = '%d, %d, and %d tokens in train, validate, and test sequences.'
     SP.print(fmt % (n_train, n_validate, n_test))
 
+    # Data generators
+    batch_size = 128
+    train_gen = DataGen(train, batch_size, win_size, vocab_size)
+    validate_gen = DataGen(validate, batch_size, win_size, vocab_size)
+
     # Create model and maybe load from disk.
     model = make_model(win_size, vocab_size)
 
-    params = (win_size, n_train, n_validate)
+    params = (win_size, n_train, n_validate, relative_pitches)
     weights_file = file_name_for_params('weights_poly', 'hdf5', params)
     weights_path = output_dir / weights_file
     if weights_path.exists():
@@ -362,23 +387,20 @@ def main():
     else:
         SP.print(f'Weights file {weights_path} not found.')
 
-    # Data generators
-    batch_size = 128
-    train_gen = DataGen(train, batch_size, win_size, vocab_size)
-    validate_gen = DataGen(validate, batch_size, win_size, vocab_size)
-
     def on_epoch_begin(epoch, logs):
         generate_midi_files(model, epoch, test,
                             vocab_size, win_size,
                             char2idx, idx2char, output_dir,
                             relative_pitches)
-    cb_checkpoint = ModelCheckpoint(
-        str(weights_path),
+    cb_cp1 = ModelCheckpoint(str(weights_path))
+    best_weights_path = '%s-best-{val_loss:.2f}.hdf' % weights_path.stem
+    cb_cp2 = ModelCheckpoint(
+        str(best_weights_path),
         monitor = 'val_loss',
         verbose = 1,
         save_best_only = True,
-        mode = 'min'
-    )
+        mode = 'min')
+
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
     model.fit(x = train_gen,
               steps_per_epoch = len(train_gen),
@@ -386,8 +408,8 @@ def main():
               validation_steps = len(validate_gen),
               verbose = 1,
               shuffle = True,
-              epochs = 10,
-              callbacks = [cb_checkpoint, cb_generate])
+              epochs = 20,
+              callbacks = [cb_cp1, cb_cp2, cb_generate])
 
 if __name__ == '__main__':
     main()
