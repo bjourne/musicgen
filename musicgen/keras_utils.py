@@ -16,7 +16,7 @@ class OneHotGenerator(Sequence):
     def __getitem__(self, i):
         base = i * self.batch_size
 
-        # Fix running over the dge.
+        # Fix running over the edge.
         n_windows = len(self.seq) - self.win_size
         batch_size = min(n_windows - base, self.batch_size)
 

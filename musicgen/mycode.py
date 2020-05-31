@@ -276,12 +276,13 @@ def corpus_to_mycode_mods(corpus_path, kb_limit, do_pack):
 ########################################################################
 # Prettyprinting
 ########################################################################
+def insn_to_string(insn):
+    cmd, arg = insn
+    if cmd == INSN_BLOCK:
+        return 'B['
+    elif cmd == INSN_REPEAT:
+        return ']R%d' % arg
+    return '%s%s' % (cmd, arg)
+
 def mycode_to_string(seq):
-    def insn_to_str(insn):
-        cmd, arg = insn
-        if cmd == INSN_BLOCK:
-            return 'B['
-        elif cmd == INSN_REPEAT:
-            return ']R%d' % arg
-        return '%s%s' % (cmd, arg)
-    return ' '.join(insn_to_str(insn) for insn in seq)
+    return ' '.join(insn_to_string(insn) for insn in seq)

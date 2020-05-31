@@ -15,7 +15,7 @@ FIRST_RESULTS_FMT = 'https://modarchive.org' \
 RESULTS_PAGE_FMT = 'https://modarchive.org' \
     '/index.php?query=%d&request=search&search_type=genre&page=%d'
 
-def get_url(url, delay = 0.2):
+def get_url(url, delay = 0.4):
     SP.print('GET %s' % url)
     r = get(url)
     sleep(delay)

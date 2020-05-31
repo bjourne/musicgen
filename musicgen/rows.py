@@ -72,6 +72,13 @@ class ModNote:
         return '%s<%d, %d>' % (self.__class__.__name__,
                                self.row_idx, self.col_idx)
 
+    def __repr__(self):
+        return '%s<%d, %d, %d>' % (self.__class__.__name__,
+                                   self.row_idx, self.col_idx,
+                                   self.duration)
+
+
+
 # If the sample is present but not the period, it is ambiguous whether
 # the cell represents repeating the note or bending a ringing
 # note. For most but not all MODs, the MIDI representation becomes
