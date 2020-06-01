@@ -22,8 +22,9 @@ from keras.models import Sequential
 from keras.optimizers import RMSprop
 from keras.utils import Sequence, to_categorical
 from musicgen.ml import generate_sequence, train_model
-from musicgen.pcode import (load_data, mod_file_to_pcode, pcode_to_string,
-                            pcode_to_midi_file)
+from musicgen.pcode import (INSN_SILENCE, PAD_TOKEN,
+                            load_data, mod_file_to_pcode,
+                            pcode_to_string, pcode_to_midi_file)
 from musicgen.utils import SP, file_name_for_params
 from pathlib import Path
 from random import randrange, shuffle
@@ -180,7 +181,7 @@ def main():
                             char2idx, idx2char, output_dir,
                             relative_pitches)
     cb_cp1 = ModelCheckpoint(str(weights_path))
-    best_weights_path = '%s-best-{val_loss:.2f}.hdf' % weights_path.stem
+    best_weights_path = '%s-best-{val_loss:.4f}.hdf5' % weights_path.stem
     cb_cp2 = ModelCheckpoint(
         str(best_weights_path),
         monitor = 'val_loss',

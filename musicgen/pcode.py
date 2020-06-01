@@ -8,7 +8,7 @@ from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
 from musicgen.utils import (SP, file_name_for_params,
                             flatten,
-                            load_pickle, save_pickle)
+                            load_pickle, save_pickle, sort_groupby)
 
 # This order works best for zodiak_-_gasp.mod
 PCODE_MIDI_MAPPING = {
