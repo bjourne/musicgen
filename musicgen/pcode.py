@@ -9,6 +9,7 @@ from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
 from musicgen.utils import (SP, file_name_for_params,
                             flatten,
                             load_pickle, save_pickle, sort_groupby)
+from random import shuffle
 
 # This order works best for zodiak_-_gasp.mod
 PCODE_MIDI_MAPPING = {
@@ -69,8 +70,10 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
             note = ModNote(ri, ci, sample_idx, pitch_idx, 48, -1)
             notes.append(note)
             at += 1
-        else:
+        elif cmd == INSN_SILENCE:
             at += arg
+        else:
+            assert False
 
     # Guess and set row time
     row_indices = {n.row_idx for n in notes}
@@ -119,6 +122,10 @@ def mod_file_to_pcode(file_path, relative_pitches):
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = rows_to_mod_notes(rows, volumes)
+    if not notes:
+        SP.print('Empty module.')
+        SP.leave()
+        return
 
     percussion = guess_percussive_instruments(mod, notes)
     fmt = 'Row time %d ms, guessed percussion: %s.'
