@@ -5,21 +5,27 @@
 """Colab Tool
 
 Usage:
-    colab-tool.py [-v] --port=<str> --password=<int> --root-path=<str>
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         get-data
-    colab-tool.py [-v] --port=<str> --password=<int> --root-path=<str>
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         upload-code
-    colab-tool.py [-v] --port=<str> --password=<int> --root-path=<str>
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         upload-caches <corpus-path>
-    colab-tool.py [-v] --port=<str> --password=<int> --root-path=<str>
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+        upload-file <local-file>
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+        upload-and-run-file <local-file>
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         run-training
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+        train-lstm-poly
 
 Options:
     -h --help                   show this screen
     -v --verbose                print more output
-    --port=<int>                port number
-    --password=<str>            password
-    --root-path=<str>           path to code and data on colab
+    --port=<i>                  port number
+    --password=<s>              password
+    --root-path=<s>             path to code and data on colab
 """
 from docopt import docopt
 from fabric import Connection
@@ -43,8 +49,16 @@ def upload_files(connection, files):
         connection.put(str(src), str(dst))
     SP.leave()
 
-def upload_code(connection):
+def remote_mkdir_safe(sftp, path):
+    try:
+        sftp.mkdir(str(path))
+    except OSError:
+        pass
+
+def upload_code(connection, sftp):
     dirs = [Path(d) for d in ['musicgen', 'tools']]
+    for dir in dirs:
+        remote_mkdir_safe(sftp, dir)
     files = flatten([[(src, d) for src in d.glob('*.py')] for d in dirs])
     upload_files(connection, files)
 
@@ -54,12 +68,30 @@ def upload_caches(connection, corpus_path):
     files = [(c, c.name) for c in caches]
     upload_files(connection, files)
 
-def run_training(connection, root_path):
-    cmds = ['pip3 install mido construct',
+def upload_file(connection, local_path):
+    files = [(local_path, local_path.name)]
+    upload_files(connection, files)
+
+def run_python_file(connection, root_path, file_name):
+    cmds = prepare_commands(root_path) \
+        + ['python3 %s' % file_name]
+    script = ' && '.join(cmds)
+    connection.run(script, pty = True)
+
+def prepare_commands(root_path):
+    return ['pip3 install mido construct',
             f'cd "{root_path}"',
-            'export PYTHONPATH="."',
-            'python3 tools/train-lstm.py -v . --pack-mycode'
-            ]
+            'export PYTHONPATH="."']
+
+def run_training(connection, root_path):
+    cmds = prepare_commands(root_path) \
+        + ['python3 tools/train-lstm.py -v . --pack-mycode']
+    script = ' && '.join(cmds)
+    connection.run(script, pty = True)
+
+def train_lstm_poly(connection, root_path):
+    cmds = prepare_commands(root_path) \
+        + ['python3 tools/train-lstm-poly.py -v .']
     script = ' && '.join(cmds)
     connection.run(script, pty = True)
 
@@ -74,16 +106,26 @@ def main():
     connection = Connection('0.ssh.ngrok.io', 'root', port,
                    connect_kwargs = connect_kwargs)
     sftp = connection.sftp()
+    remote_mkdir_safe(sftp, root_path)
     sftp.chdir(str(root_path))
     if args['get-data']:
         get_data(connection, sftp)
     elif args['upload-code']:
-        upload_code(connection)
+        upload_code(connection, sftp)
     elif args['run-training']:
         run_training(connection, root_path)
     elif args['upload-caches']:
         corpus_path = Path(args['<corpus-path>'])
         upload_caches(connection, corpus_path)
+    elif args['upload-file']:
+        local_path = Path(args['<local-file>'])
+        upload_file(connection, local_path)
+    elif args['train-lstm-poly']:
+        train_lstm_poly(connection, root_path)
+    elif args['upload-and-run-file']:
+        local_path = Path(args['<local-file>'])
+        upload_file(connection, local_path)
+        run_python_file(connection, root_path, local_path.name)
     else:
         assert False
 
