@@ -10,6 +10,7 @@ from musicgen.utils import (SP, file_name_for_params,
                             flatten,
                             load_pickle, save_pickle, sort_groupby)
 from random import shuffle
+import numpy as np
 
 # This order works best for zodiak_-_gasp.mod
 PCODE_MIDI_MAPPING = {
@@ -23,8 +24,6 @@ INSN_PITCH = 'P'
 INSN_REL_PITCH = 'R'
 INSN_SILENCE = 'S'
 INSN_DRUM = 'D'
-INSN_PROGRAM = 'X'
-PAD_TOKEN = (INSN_PROGRAM, 0)
 
 ########################################################################
 # Encode/Decode
@@ -176,9 +175,6 @@ def mod_file_to_pcode(file_path, relative_pitches):
                 delta -= threshold
         assert delta >= -1
 
-    # Begin with pad token
-    yield PAD_TOKEN
-
     at = 0
     last_pitch = None
     for ofs, is_drum, arg in notes:
@@ -194,6 +190,10 @@ def mod_file_to_pcode(file_path, relative_pitches):
         at = ofs
     SP.leave()
 
+    # We end every mod with four bars of silence
+    for _ in range(4):
+        yield INSN_SILENCE, 16
+
 ########################################################################
 # Test encode and decode
 ########################################################################
@@ -201,16 +201,22 @@ def test_encode_decode(mod_file, relative_pitches):
     pcode = list(mod_file_to_pcode(mod_file, relative_pitches))
     pcode_to_midi_file(pcode, 'test.mid', relative_pitches)
 
-
 ########################################################################
 # Cache loading
 ########################################################################
+def pcode_to_training_sequence(pcode):
+    ix2ch = sorted(set(pcode))
+    ch2ix = {c : i for i, c in enumerate(ix2ch)}
+    seq = np.array([ch2ix[ch] for ch in pcode], dtype = np.uint8)
+    return ix2ch, ch2ix, seq
+
 def load_data_from_disk(corpus_path, mods, relative_pitches):
     file_paths = [corpus_path / mod.genre / mod.fname for mod in mods]
-    pcodes = [mod_file_to_pcode(fp, relative_pitches)
-              for fp in file_paths]
-    shuffle(pcodes)
-    return flatten(pcodes)
+    pcode_per_mod = [mod_file_to_pcode(fp, relative_pitches)
+                     for fp in file_paths]
+    shuffle(pcode_per_mod)
+    pcode = flatten(pcode_per_mod)
+    return pcode_to_training_sequence(pcode)
 
 def load_data(corpus_path, kb_limit, relative_pitches):
     index = load_index(corpus_path)
@@ -224,6 +230,6 @@ def load_data(corpus_path, kb_limit, relative_pitches):
     cache_path = corpus_path / cache_file
     if not cache_path.exists():
         SP.print('Cache file %s not found.' % cache_file)
-        seq = load_data_from_disk(corpus_path, mods, relative_pitches)
-        save_pickle(cache_path, seq)
+        obj = load_data_from_disk(corpus_path, mods, relative_pitches)
+        save_pickle(cache_path, obj)
     return load_pickle(cache_path)

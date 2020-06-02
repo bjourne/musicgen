@@ -1,5 +1,5 @@
 ########################################################################
-# *** RESULTS ***
+# === RESULTS ===
 #
 # ED LSTM1 LSTM2  DO  LR    N-PARAMS BS   STRIDE N  VAL-LOSS
 # 64   256   256  .2  0.01           1024     -1 20  1.77803
@@ -12,32 +12,40 @@
 # 16   128   128  .2  0.02   221 422  512     -1 60  1.67745
 #
 # *** MORE DATA ***
-# ED LSTM1 LSTM2  DO  LR    N-PARAMS  BS  STRIDE N  VAL-LOSS
-# 16   128   128  .2  0.01    212494  512     -1 60  1.59445
-# 16   128   128  .2  0.01    212494  256     -1 60  1.57344
-# 16   128   128  .2  0.01    212494  256     -1 80  1.59031
-# 16   128   128  .2  0.01    212494  128     -1 80  1.65849
-# 16   128   128  .2  0.005   212494  128     -1 80
+# ED LSTM1 LSTM2  DO  LR    N-PARAMS  BS  STRIDE  N  VAL-LOSS
+# 16   128   128  .2  0.01    212494  512     -1  60  1.59445
+# 16   128   128  .2  0.01    212494  256     -1  60  1.57344
+# 16   128   128  .2  0.01    212494  256     -1  80  1.59031
+# 16   128   128  .2  0.01    212494  128     -1  80  1.65849
+# 16   128   128  .2  0.005   212494  128     -1  80  1.53826
+#  8   128   128  .2  0.005   208030  128     -1 100  1.60921
+# 32   128   128  .2  0.005   221422  128     -1 100  1.52926
+# 32   128   128  .3  0.005   221422  128     -1 100  1.54948
+# 32   128   128  .1  0.005   221422  128     -1 100  1.52442+
+# 32   128   128  .0  0.005   221422  128     -1 120  1.60271 (1.4057)
+#
+# *** EVEN MORE DATA *** (45 vocab)
+# ED LSTM1 LSTM2  DO  LR    N-PARAMS  BS  STRIDE  N  VAL-LOSS
+# 32   128   128  .1  0.005   221261 128     -1 120   1.52852 (1.4217)
+# 32   128   128  .1  0.005   221261 128     -1 120   1.51869 (1.4141)
 
-# (Some) Hyperparameters here
+# Hyperparameters here
 ROOT_PATH = '/content/drive/My Drive/musicgen'
 BATCH_SIZE = 128
-EPOCHS = 80
+EPOCHS = 120
 LEARNING_RATE = 0.005
-EMBEDDING_DIM = 16
+EMBEDDING_DIM = 32
 LSTM1_UNITS = 128
 LSTM2_UNITS = 128
-DROPOUT = 0.2
+DROPOUT = 0.1
 SEQ_LEN = 128
-
 
 from pathlib import Path
 from sys import path
 path.append(ROOT_PATH)
 
 from logging import ERROR
-from musicgen.pcode import (INSN_SILENCE, PAD_TOKEN,
-                            load_data, pcode_to_midi_file)
+from musicgen.pcode import INSN_SILENCE, load_data, pcode_to_midi_file
 from musicgen.utils import SP, file_name_for_params
 from os import environ, listdir
 
@@ -107,15 +115,17 @@ def create_tf_dataset(dataset, seq_len, batch_size, stride):
         .batch(batch_size, drop_remainder = True)
 
 def do_train(train, validate, seq_len, vocab_size, batch_size):
+    # Must be done before creating the datasets.
+    strategy = initialize_tpus()
+
     # Reshape the raw data into tensorflow Datasets
     ds_train = create_tf_dataset(train, seq_len, batch_size,
                                  seq_len - 1)
     ds_validate = create_tf_dataset(validate, seq_len, batch_size,
                                     seq_len - 1)
-    strategy = initialize_tpus()
+
     with strategy.scope():
         model = lstm_model(seq_len, vocab_size, None, False)
-        # loss = 1.7202
         opt1 = RMSprop(learning_rate = LEARNING_RATE)
         model.compile(
             optimizer = opt1,
@@ -133,12 +143,13 @@ def do_train(train, validate, seq_len, vocab_size, batch_size):
     model.fit(x = ds_train,
               validation_data = ds_validate,
               epochs = EPOCHS,
-              callbacks = [cb_best])
+              callbacks = [cb_best],
+              verbose = 2)
     model.save_weights(
         str(Path(ROOT_PATH) / 'tpu-weights.h5'),
         overwrite = True)
 
-def generate_sequences(model, dataset, temperatures, seed, length, eos):
+def generate_sequences(model, dataset, temperatures, seed, length):
     SP.header('TEMPERATURES %s' % temperatures)
     batch_size = len(temperatures)
 
@@ -151,10 +162,6 @@ def generate_sequences(model, dataset, temperatures, seed, length, eos):
         last_word = preds[-1]
         P = model.predict(last_word)[:, 0, :]
 
-        # Zero probability for the eos token
-        P[:,eos] = 0
-        P = (P.T / P.sum(axis = 1)).T
-
         next_idx = [np.random.choice(P.shape[1], p = P[i])
                     for i in range(batch_size)]
         preds.append(np.asarray(next_idx, dtype = np.int32))
@@ -166,56 +173,48 @@ def generate_sequences(model, dataset, temperatures, seed, length, eos):
     SP.leave()
     return seqs
 
-def do_predict(test, vocab, ch2ix, temperatures, seq_len):
+def do_predict(test, ix2ch, ch2ix, temperatures, seq_len):
     batch_size = len(temperatures)
-    model = lstm_model(1, len(vocab), batch_size, True)
+    model = lstm_model(1, len(ix2ch), batch_size, True)
     model.load_weights(str(Path(ROOT_PATH) / 'best.h5'))
     model.reset_states()
 
-    SP.print('Looking for a seed.')
-    eos = ch2ix[PAD_TOKEN]
-    while True:
-        idx = randrange(len(test) - seq_len)
-        seed = np.array(test[idx:idx + seq_len])
-        if not eos in seed:
-            break
+    idx = randrange(len(test) - seq_len)
+    seed = np.array(test[idx:idx + seq_len])
 
     seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
-    seqs = generate_sequences(model, test, temperatures, seed, 500, eos)
-    join = np.array([ch2ix[(INSN_SILENCE, 8)]] * 4)
+    seqs = generate_sequences(model, test, temperatures, seed, 500)
+    # Two bars of silence
+    join = np.array([ch2ix[(INSN_SILENCE, 16)]] * 2)
     join = np.repeat(np.expand_dims(join, 0), batch_size, axis = 0)
     seqs = np.hstack((seed, join, seqs))
 
-    seqs = [[vocab[ix] for ix in seq] for seq in seqs]
+    seqs = [[ix2ch[ix] for ix in seq] for seq in seqs]
     for i, seq in enumerate(seqs):
         file_path = Path(ROOT_PATH) / ('tpu-test-%02d.mid' % i)
         pcode_to_midi_file(seq, file_path, False)
 
 def main():
     SP.enabled = True
-    dataset = load_data(Path(ROOT_PATH), 150, False)
+    ix2ch, ch2ix, seq = load_data(Path(ROOT_PATH), 150, False)
 
     # Convert to integer sequence
-    n_dataset = len(dataset)
-    vocab = sorted(set(dataset))
-    vocab_size = len(vocab)
-    ch2ix = {c : i for i, c in enumerate(vocab)}
-    dataset = np.array([ch2ix[c] for c in dataset])
+    n_seq = len(seq)
+    vocab_size = len(ix2ch)
 
     # Split data
-    n_train = int(n_dataset * 0.8)
-    n_validate = int(n_dataset * 0.1)
-    n_test = n_dataset - n_train - n_validate
-    train = dataset[:n_train]
-    validate = dataset[n_train:n_train + n_validate]
-    test = dataset[n_train + n_validate:]
+    n_train = int(n_seq * 0.8)
+    n_validate = int(n_seq * 0.1)
+    n_test = n_seq - n_train - n_validate
+    train = seq[:n_train]
+    validate = seq[n_train:n_train + n_validate]
+    test = seq[n_train + n_validate:]
     fmt = '%d, %d, and %d tokens in train, validate, and test sequences.'
     SP.print(fmt % (n_train, n_validate, n_test))
 
-    # Run training
+    # Run training and prediction.
     do_train(train, validate, SEQ_LEN, vocab_size, BATCH_SIZE)
-
-    do_predict(test, vocab, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5], SEQ_LEN)
+    do_predict(test, ix2ch, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5], SEQ_LEN)
 
 if __name__ == '__main__':
     main()

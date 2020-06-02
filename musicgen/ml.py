@@ -24,7 +24,7 @@ def make_model(seq_len, n_chars):
     print(model.summary())
     return model
 
-def generate_sequence(model, S, seq_len, temp, eos):
+def generate_sequence(model, S, seq_len, temp):
     X = np.expand_dims(S, axis = 0)
     seq = []
     log_lh = 0.0
@@ -36,9 +36,6 @@ def generate_sequence(model, S, seq_len, temp, eos):
 
         # Reweigh probabilities according to temperature.
         P = np.exp(np.log(P) / temp)
-
-        # To avoid picking the end of sequence token
-        P[eos] = 0.0
 
         # Renormalize
         P = P / np.sum(P)
@@ -64,9 +61,9 @@ def train_model(train, validate,
         SP.print(f'Weights file {weights_path} not found.')
 
     train_gen = OneHotGenerator(train,
-                                      batch_size, win_size, vocab_size)
+                                batch_size, win_size, vocab_size)
     validate_gen = OneHotGenerator(validate,
-                                         batch_size, win_size, vocab_size)
+                                   batch_size, win_size, vocab_size)
     cb_checkpoint = ModelCheckpoint(
         str(weights_path),
         monitor = 'val_loss',
