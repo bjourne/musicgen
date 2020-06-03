@@ -1,48 +1,28 @@
+# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 ########################################################################
-# === RESULTS ===
-#
-# ED LSTM1 LSTM2  DO  LR    N-PARAMS BS   STRIDE N  VAL-LOSS
-# 64   256   256  .2  0.01           1024     -1 20  1.77803
-# 64   128   128  .2  0.01   239 278 1024     -1 20  1.72698
-# 32   128   128  .2  0.01   221 422 1024     -1 40  1.71708
-# 32   128   128  .2  0.01   221 422  512     -1 40  1.63385
-# 32   128   128  .2  0.01   221 422  512     -4 50  1.62806+
-# 16   128   128  .2  0.01   221 422  512     -1 50  1.63923
-# 16   128   128  .2  0.005  221 422  512     -1 60  1.68280
-# 16   128   128  .2  0.02   221 422  512     -1 60  1.67745
-#
-# *** MORE DATA ***
-# ED LSTM1 LSTM2  DO  LR    N-PARAMS  BS  STRIDE  N  VAL-LOSS
-# 16   128   128  .2  0.01    212494  512     -1  60  1.59445
-# 16   128   128  .2  0.01    212494  256     -1  60  1.57344
-# 16   128   128  .2  0.01    212494  256     -1  80  1.59031
-# 16   128   128  .2  0.01    212494  128     -1  80  1.65849
-# 16   128   128  .2  0.005   212494  128     -1  80  1.53826
-#  8   128   128  .2  0.005   208030  128     -1 100  1.60921
-# 32   128   128  .2  0.005   221422  128     -1 100  1.52926
-# 32   128   128  .3  0.005   221422  128     -1 100  1.54948
-# 32   128   128  .1  0.005   221422  128     -1 100  1.52442+
-# 32   128   128  .0  0.005   221422  128     -1 120  1.60271 (1.4057)
-#
-# *** EVEN MORE DATA *** (45 vocab)
-# ED LSTM1 LSTM2  DO  LR    N-PARAMS  BS  STRIDE  N  VAL-LOSS
-# 32   128   128  .1  0.005   221261 128     -1 120   1.52852 (1.4217)
-# 32   128   128  .1  0.005   221261 128     -1 120   1.51869 (1.4141)
+"""Polyphonic LSTM using TPU
+
+Usage:
+    tpu-training.py [options] <corpus-path>
+
+Options:
+    -h --help              show this screen
+    -v --verbose           print more output
+"""
 
 # Hyperparameters here
-ROOT_PATH = '/content/drive/My Drive/musicgen'
 BATCH_SIZE = 128
 EPOCHS = 120
 LEARNING_RATE = 0.005
 EMBEDDING_DIM = 32
 LSTM1_UNITS = 128
 LSTM2_UNITS = 128
-DROPOUT = 0.1
+DROPOUT = 0.05
 SEQ_LEN = 128
 
+from docopt import docopt
 from pathlib import Path
 from sys import path
-path.append(ROOT_PATH)
 
 from logging import ERROR
 from musicgen.pcode import INSN_SILENCE, load_data, pcode_to_midi_file
@@ -89,7 +69,12 @@ def lstm_model(seq_len, vocab_size, batch_size, stateful):
     return Model(inputs = [source], outputs = [predicted_char])
 
 def initialize_tpus():
-    tpu = 'grpc://' + environ['COLAB_TPU_ADDR']
+    print(environ)
+
+    tpu_addr = '10.13.184.42:8470'
+    tpu = 'grpc://' + tpu_addr
+
+    # tpu = 'grpc://' + environ['COLAB_TPU_ADDR']
     resolver = TPUClusterResolver(tpu)
     experimental_connect_to_cluster(resolver)
     initialize_tpu_system(resolver)
@@ -114,7 +99,8 @@ def create_tf_dataset(dataset, seq_len, batch_size, stride):
         .shuffle(10000) \
         .batch(batch_size, drop_remainder = True)
 
-def do_train(train, validate, seq_len, vocab_size, batch_size):
+def do_train(corpus_path, train, validate, seq_len,
+             vocab_size, batch_size):
     # Must be done before creating the datasets.
     strategy = initialize_tpus()
 
@@ -134,7 +120,7 @@ def do_train(train, validate, seq_len, vocab_size, batch_size):
         SP.print(model.summary())
 
     cb_best = ModelCheckpoint(
-        str(Path(ROOT_PATH) / 'best.h5'),
+        str(corpus_path / 'best.h5'),
         monitor = 'val_loss',
         verbose = 1,
         save_best_only = True,
@@ -145,9 +131,8 @@ def do_train(train, validate, seq_len, vocab_size, batch_size):
               epochs = EPOCHS,
               callbacks = [cb_best],
               verbose = 2)
-    model.save_weights(
-        str(Path(ROOT_PATH) / 'tpu-weights.h5'),
-        overwrite = True)
+    model.save_weights(str(corpus_path / 'tpu-weights.h5'),
+                       overwrite = True)
 
 def generate_sequences(model, dataset, temperatures, seed, length):
     SP.header('TEMPERATURES %s' % temperatures)
@@ -173,10 +158,10 @@ def generate_sequences(model, dataset, temperatures, seed, length):
     SP.leave()
     return seqs
 
-def do_predict(test, ix2ch, ch2ix, temperatures, seq_len):
+def do_predict(corpus_path, test, ix2ch, ch2ix, temperatures, seq_len):
     batch_size = len(temperatures)
     model = lstm_model(1, len(ix2ch), batch_size, True)
-    model.load_weights(str(Path(ROOT_PATH) / 'best.h5'))
+    model.load_weights(str(corpus_path / 'best.h5'))
     model.reset_states()
 
     idx = randrange(len(test) - seq_len)
@@ -191,12 +176,34 @@ def do_predict(test, ix2ch, ch2ix, temperatures, seq_len):
 
     seqs = [[ix2ch[ix] for ix in seq] for seq in seqs]
     for i, seq in enumerate(seqs):
-        file_path = Path(ROOT_PATH) / ('tpu-test-%02d.mid' % i)
+        file_name = 'tpu-test-%02d.mid' % i
+        file_path = corpus_path / file_name
         pcode_to_midi_file(seq, file_path, False)
 
+def print_hyperparams():
+    SP.header('HYPER PARAMETERS')
+    params = [
+        ('Batch size', BATCH_SIZE),
+        ('Epochs', EPOCHS),
+        ('Learning rate', LEARNING_RATE),
+        ('Embedding dimension', EMBEDDING_DIM),
+        ('LSTM1 units', LSTM1_UNITS),
+        ('LSTM2 units', LSTM2_UNITS),
+        ('Dropout (both layers)', DROPOUT),
+        ('Sequence length', SEQ_LEN)]
+    for param, value in params:
+        SP.print('%-22s: %5s' % (param, value))
+    SP.leave()
+
+
 def main():
-    SP.enabled = True
-    ix2ch, ch2ix, seq = load_data(Path(ROOT_PATH), 150, False)
+    args = docopt(__doc__, version = 'Train LSTM Using TPU 1.0')
+    SP.enabled = args['--verbose']
+    corpus_path = Path(args['<corpus-path>'])
+    ix2ch, ch2ix, seq = load_data(corpus_path, 150, False)
+
+    print_hyperparams()
+    return
 
     # Convert to integer sequence
     n_seq = len(seq)
@@ -213,8 +220,10 @@ def main():
     SP.print(fmt % (n_train, n_validate, n_test))
 
     # Run training and prediction.
-    do_train(train, validate, SEQ_LEN, vocab_size, BATCH_SIZE)
-    do_predict(test, ix2ch, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5], SEQ_LEN)
+    do_train(corpus_path, train, validate, SEQ_LEN,
+             vocab_size, BATCH_SIZE)
+    do_predict(corpus_path, test, ix2ch, ch2ix,
+               [0.5, 0.8, 1.0, 1.2, 1.5], SEQ_LEN)
 
 if __name__ == '__main__':
     main()
