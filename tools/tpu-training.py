@@ -9,57 +9,13 @@ Options:
     -v --verbose           print more output
     --relative-pitches     use pcode with relative pitches
 """
-
-# Hyperparameters not from the command line here.
-class ExperimentParameters:
-    BATCH_SIZE = 128
-    EPOCHS = 150
-    LEARNING_RATE = 0.005
-    EMBEDDING_DIM = 4
-    LSTM1_UNITS = 128
-    LSTM2_UNITS = 128
-    DROPOUT = 0.1
-    SEQ_LEN = 128
-
-    def __init__(self, corpus_path, relative_pitches):
-        self.corpus_path = corpus_path
-        self.relative_pitches = relative_pitches
-
-    def weights_path(self):
-        fmt = 'weights-%03d-%03d-%.5f-%02d-%03d-%03d-%.2f-%s.h5'
-        args = (self.BATCH_SIZE,
-                self.EPOCHS,
-                self.LEARNING_RATE,
-                self.EMBEDDING_DIM,
-                self.LSTM1_UNITS,
-                self.LSTM2_UNITS,
-                self.DROPOUT,
-                self.relative_pitches)
-        file_name = fmt % args
-        return self.corpus_path / file_name
-
-    def print(self):
-        SP.header('HYPER PARAMETERS')
-        params = [
-            ('Batch size', self.BATCH_SIZE),
-            ('Epochs', self.EPOCHS),
-            ('Learning rate', self.LEARNING_RATE),
-            ('Embedding dimension', self.EMBEDDING_DIM),
-            ('LSTM1 units', self.LSTM1_UNITS),
-            ('LSTM2 units', self.LSTM2_UNITS),
-            ('Dropout (both layers)', self.DROPOUT),
-            ('Sequence length', self.SEQ_LEN)]
-        for param, value in params:
-            SP.print('%-22s: %5s' % (param, value))
-        SP.leave()
-
-
-
-
+from collections import Counter
 from docopt import docopt
 from logging import ERROR
 from musicgen.pcode import (EOS_SILENCE, INSN_SILENCE,
-                            load_data, pcode_to_midi_file,
+                            analyze_pcode,
+                            load_corpus, load_mod_file,
+                            pcode_to_midi_file,
                             pcode_to_string)
 from musicgen.utils import SP, file_name_for_params, find_subseq
 from os import environ, listdir
@@ -78,8 +34,51 @@ from tensorflow.keras.optimizers import *
 from tensorflow.tpu.experimental import initialize_tpu_system
 import numpy as np
 
-# get_logger().setLevel(ERROR)
-# environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+# Hyperparameters not from the command line here.
+class ExperimentParameters:
+    BATCH_SIZE = 128
+    EPOCHS = 150
+    LEARNING_RATE = 0.005
+    EMBEDDING_DIM = 4
+    LSTM1_UNITS = 128
+    LSTM2_UNITS = 128
+    DROPOUT = 0.1
+    SEQ_LEN = 128
+
+    def __init__(self, output_path, relative_pitches):
+        self.output_path = output_path
+        self.relative_pitches = relative_pitches
+
+    def weights_path(self):
+        fmt = 'weights-%03d-%03d-%.5f-%02d-%03d-%03d-%.2f-%s.h5'
+        args = (self.BATCH_SIZE,
+                self.EPOCHS,
+                self.LEARNING_RATE,
+                self.EMBEDDING_DIM,
+                self.LSTM1_UNITS,
+                self.LSTM2_UNITS,
+                self.DROPOUT,
+                self.relative_pitches)
+        file_name = fmt % args
+        return self.output_path / file_name
+
+    def print(self):
+        SP.header('EXPERIMENT PARAMETERS')
+        params = [
+            ('Batch size', self.BATCH_SIZE),
+            ('Epochs', self.EPOCHS),
+            ('Learning rate', self.LEARNING_RATE),
+            ('Embedding dimension', self.EMBEDDING_DIM),
+            ('LSTM1 units', self.LSTM1_UNITS),
+            ('LSTM2 units', self.LSTM2_UNITS),
+            ('Dropout (both layers)', self.DROPOUT),
+            ('Sequence length', self.SEQ_LEN),
+            ('Relative pitches', self.relative_pitches),
+            ('Output path', self.output_path)]
+        for param, value in params:
+            SP.print('%-22s: %5s' % (param, value))
+        SP.leave()
 
 def lstm_model(params, seq_len, vocab_size, batch_size, stateful):
     source = Input(
@@ -105,12 +104,11 @@ def lstm_model(params, seq_len, vocab_size, batch_size, stateful):
     return Model(inputs = [source], outputs = [predicted_char])
 
 def initialize_tpus():
-    print(environ)
-    # tpu_addr = '10.13.184.42:8470'
-    tpu = 'grpc://10.96.199.218:8470'
-
-    #tpu = 'grpc://' + environ['COLAB_TPU_ADDR']
-    resolver = TPUClusterResolver(tpu)
+    tpu_addr = environ.get('COLAB_TPU_ADDR')
+    if not tpu_addr:
+        SP.print('TPU not found.')
+        return None
+    resolver = TPUClusterResolver('grpc://' + tpu_addr)
     experimental_connect_to_cluster(resolver)
     initialize_tpu_system(resolver)
     devs = list_logical_devices('TPU')
@@ -121,7 +119,7 @@ def initialize_tpus():
     SP.leave()
     return TPUStrategy(resolver)
 
-def create_tf_dataset(seq, params):
+def create_dataset(seq, params):
     # Make this parameter configurable.
     stride = params.SEQ_LEN - 1
     def split_input_target(chunk):
@@ -139,23 +137,29 @@ def create_tf_dataset(seq, params):
         .shuffle(10000) \
         .batch(params.BATCH_SIZE, drop_remainder = True)
 
+def create_training_model(params, vocab_size):
+    model = lstm_model(params, params.SEQ_LEN, vocab_size, None, False)
+    opt1 = RMSprop(learning_rate = params.LEARNING_RATE)
+    model.compile(
+        optimizer = opt1,
+        loss = 'sparse_categorical_crossentropy',
+        metrics = ['sparse_categorical_accuracy'])
+    return model
+
 def do_train(train, validate, vocab_size, params):
     # Must be done before creating the datasets.
     strategy = initialize_tpus()
 
     # Reshape the raw data into tensorflow Datasets
-    ds_train = create_tf_dataset(train, params)
-    ds_validate = create_tf_dataset(validate, params)
+    ds_train = create_dataset(train, params)
+    ds_validate = create_dataset(validate, params)
 
-    with strategy.scope():
-        model = lstm_model(params, params.SEQ_LEN, vocab_size,
-                           None, False)
-        opt1 = RMSprop(learning_rate = params.LEARNING_RATE)
-        model.compile(
-            optimizer = opt1,
-            loss = 'sparse_categorical_crossentropy',
-            metrics = ['sparse_categorical_accuracy'])
-        model.summary()
+    if strategy:
+        with strategy.scope():
+            model = create_training_model(params, vocab_size)
+    else:
+        model = create_training_model(params, vocab_size)
+    model.summary()
 
     weights_path = params.weights_path()
     if weights_path.exists():
@@ -173,7 +177,7 @@ def do_train(train, validate, vocab_size, params):
                         validation_data = ds_validate,
                         epochs = params.EPOCHS,
                         callbacks = [cb_best],
-                        verbose = 2)
+                        verbose = 1)
     print(history)
 
 def generate_sequences(model, dataset, temperatures, seed, length):
@@ -228,30 +232,28 @@ def do_predict(seq, ix2ch, ch2ix, temperatures, params):
     for i, seq in enumerate(seqs):
         args = params.relative_pitches, i
         file_name = file_name_fmt % args
-        file_path = params.corpus_path / file_name
+        file_path = params.output_path / file_name
         pcode_to_midi_file(seq, file_path, params.relative_pitches)
     SP.leave()
 
 def main():
     args = docopt(__doc__, version = 'Train LSTM Using TPU 1.0')
     SP.enabled = args['--verbose']
-    corpus_path = Path(args['<corpus-path>'])
+    output_path = Path(args['<corpus-path>'])
     relative_pitches = args['--relative-pitches']
-    params = ExperimentParameters(corpus_path, relative_pitches)
 
-    if corpus_path.is_dir():
-        ix2ch, ch2ix, seq = load_data(corpus_path, 150, relative_pitches)
-        output_dir = corpus_path
+    # Load sequence
+    if output_path.is_dir():
+        ix2ch, ch2ix, seq = load_corpus(output_path, 150,
+                                        relative_pitches)
     else:
-        output_dir = Path('.')
+        ix2ch, ch2ix, seq = load_mod_file(output_path, relative_pitches)
+        output_path = Path('.')
+    analyze_pcode(ix2ch, seq)
 
-
-
-    ix2ch, ch2ix, seq = load_data(params.corpus_path, 150,
-                                  params.relative_pitches)
+    params = ExperimentParameters(output_path, relative_pitches)
     params.print()
 
-    # Convert to integer sequence
     n_seq = len(seq)
     vocab_size = len(ix2ch)
 
