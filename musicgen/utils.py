@@ -69,3 +69,12 @@ def file_name_for_params(base, ext, params):
         return '%%0%dd' % n
     strs = [param_to_fmt(p) % p for p in params]
     return '%s_%s.%s' % (base, '-'.join(strs), ext)
+
+def find_subseq(seq, subseq):
+    '''Find indices to occurrences of subseq in seq. Oddly enough this
+    function doesn't exist in Python's standard library.
+    '''
+    l = len(subseq)
+    for i in range(len(seq) - l + 1):
+        if seq[i:i+l] == subseq:
+            yield i

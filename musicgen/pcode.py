@@ -25,6 +25,9 @@ INSN_REL_PITCH = 'R'
 INSN_SILENCE = 'S'
 INSN_DRUM = 'D'
 
+# All songs end with four bars of silence
+EOS_SILENCE = [(INSN_SILENCE, 16)] * 4
+
 ########################################################################
 # Encode/Decode
 ########################################################################
@@ -191,8 +194,8 @@ def mod_file_to_pcode(file_path, relative_pitches):
     SP.leave()
 
     # We end every mod with four bars of silence
-    for _ in range(4):
-        yield INSN_SILENCE, 16
+    for insn in EOS_SILENCE:
+        yield insn
 
 ########################################################################
 # Test encode and decode

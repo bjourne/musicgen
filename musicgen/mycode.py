@@ -7,7 +7,8 @@ from musicgen.corpus import load_index
 from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import ModNote, linearize_rows, column_to_mod_notes
 from musicgen.ssrs import find_min_ssr
-from musicgen.utils import (SP, file_name_for_params,
+from musicgen.utils import (SP,
+                            file_name_for_params, find_subseq,
                             flatten,
                             load_pickle, save_pickle)
 from time import time
@@ -187,12 +188,6 @@ def mod_file_to_mycode(file_path, do_pack):
 ########################################################################
 # Guessing logic
 ########################################################################
-def find_subseq(seq, subseq):
-    l = len(subseq)
-    for i in range(len(seq) - l + 1):
-        if seq[i:i+l] == subseq:
-            yield i
-
 def guess_initial_duration(seq):
     prefix = list(takewhile(lambda x: x[0] != INSN_DUR, seq))
     if prefix == seq:
