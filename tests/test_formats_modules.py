@@ -47,7 +47,7 @@ def percussive_samples(mod):
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = list(rows_to_mod_notes(rows, volumes))
-    return {sample for (sample, p) in sample_props(mod, notes)
+    return {sample for (sample, p) in sample_props(mod, notes).items()
             if p.is_percussive}
 
 def test_sample_length():
