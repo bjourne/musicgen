@@ -13,11 +13,11 @@ Options:
     --fraction=<float>     fraction of corpus to use [default: 1.0]
 """
 from docopt import docopt
-from musicgen.ml import generate_sequence
 from musicgen.mycode import (INSN_JUMP,
                              load_corpus,
                              mcode_to_midi_file,
                              mcode_to_string)
+from musicgen.tf_utils import OneHotGenerator
 from musicgen.utils import (SP,
                             analyze_code,
                             encode_training_sequence,
@@ -52,6 +52,32 @@ def flatten_corpus(corpus_path, kb_limit, pack_mcode, fraction):
             seq.append((INSN_JUMP, 64))
         return encode_training_sequence(flatten(seqs))
     return load_pickle_cache(cache_path, rebuild_fun)
+
+def generate_sequence(model, S, seq_len, temp):
+    X = np.expand_dims(S, axis = 0)
+    seq = []
+    log_lh = 0.0
+    for _ in range(seq_len):
+        P = model.predict(X, verbose = 0)[0]
+
+        # Extra precision needed to ensure np.sum(P) == 1.0.
+        P = P.astype(np.float64)
+
+        # Reweigh probabilities according to temperature.
+        P = np.exp(np.log(P) / temp)
+
+        # Renormalize
+        P = P / np.sum(P)
+
+        # Faster than np.random.choice
+        Y = np.random.multinomial(1, P, 1)[0]
+        X = np.roll(X, -1, axis = 1)
+        X[0, -1] = Y
+
+        idx = np.argmax(Y)
+        seq.append(idx)
+        log_lh += np.log(P[idx])
+    return log_lh, seq
 
 def generate_midi_files(model, epoch, seq, win_size,
                         ch2ix, ix2ch, corpus_path):
@@ -97,34 +123,6 @@ def make_model(seq_len, n_chars):
                   metrics = ['accuracy'])
     print(model.summary())
     return model
-
-class OneHotGenerator(Sequence):
-    def __init__(self, seq, batch_size, win_size, vocab_size):
-        self.seq = seq
-        self.batch_size = batch_size
-        self.win_size = win_size
-        self.vocab_size = vocab_size
-
-    def __len__(self):
-        n_windows = len(self.seq) - self.win_size
-        return int(np.ceil(n_windows / self.batch_size))
-
-    def __getitem__(self, i):
-        base = i * self.batch_size
-
-        # Fix running over the edge.
-        n_windows = len(self.seq) - self.win_size
-        batch_size = min(n_windows - base, self.batch_size)
-
-        X = np.zeros((batch_size, self.win_size, self.vocab_size),
-                     dtype = np.bool)
-        Y = np.zeros((batch_size, self.vocab_size),
-                     dtype = np.bool)
-        for i in range(batch_size):
-            for j in range(self.win_size):
-                X[i, j, self.seq[base + i + j]] = 1
-            Y[i, self.seq[base + i + self.win_size]] = 1
-        return X, Y
 
 def main():
     args = docopt(__doc__, version = 'Monophonic model 1.0')

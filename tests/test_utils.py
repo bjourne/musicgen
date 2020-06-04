@@ -1,4 +1,4 @@
-from musicgen.keras_utils import OneHotGenerator
+from musicgen.tf_utils import OneHotGenerator
 
 def test_one_hot_generator():
     seq = [0] * 200
