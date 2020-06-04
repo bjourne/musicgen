@@ -38,9 +38,9 @@ import numpy as np
 # Hyperparameters not from the command line here.
 class ExperimentParameters:
     BATCH_SIZE = 128
-    EPOCHS = 150
+    EPOCHS = 100
     LEARNING_RATE = 0.005
-    EMBEDDING_DIM = 4
+    EMBEDDING_DIM = 32
     LSTM1_UNITS = 128
     LSTM2_UNITS = 128
     DROPOUT = 0.1
@@ -81,33 +81,32 @@ class ExperimentParameters:
         SP.leave()
 
 def lstm_model(params, seq_len, vocab_size, batch_size, stateful):
-    source = Input(
-        name = 'seed',
-        shape = (seq_len,),
-        batch_size = batch_size,
-        dtype = int32)
-    embedding = Embedding(
-        input_dim = vocab_size,
-        output_dim = params.EMBEDDING_DIM)(source)
-    lstm_1 = LSTM(
-        params.LSTM1_UNITS,
-        stateful = stateful,
-        return_sequences = True,
-        dropout = params.DROPOUT)(embedding)
-    lstm_2 = LSTM(
-        params.LSTM2_UNITS,
-        stateful = stateful,
-        return_sequences = True,
-        dropout = params.DROPOUT)(lstm_1)
-    predicted_char = TimeDistributed(
-        Dense(vocab_size, activation = 'softmax'))(lstm_2)
-    return Model(inputs = [source], outputs = [predicted_char])
+    return Sequential([
+        Embedding(
+            input_dim = vocab_size,
+            output_dim = params.EMBEDDING_DIM,
+            batch_input_shape = [batch_size, None]),
+        LSTM(
+            params.LSTM1_UNITS,
+            stateful = stateful,
+            return_sequences = True,
+            dropout = params.DROPOUT),
+        LSTM(
+            params.LSTM2_UNITS,
+            stateful = stateful,
+            return_sequences = True,
+            dropout = params.DROPOUT),
+        TimeDistributed(
+            Dense(vocab_size, activation = 'softmax'))
+    ])
 
 def initialize_tpus():
+
     tpu_addr = environ.get('COLAB_TPU_ADDR')
     if not tpu_addr:
-        SP.print('TPU not found.')
+        SP.print('TPU not configured.')
         return None
+    SP.print('Connecting to TPU at %s.' % tpu_addr)
     resolver = TPUClusterResolver('grpc://' + tpu_addr)
     experimental_connect_to_cluster(resolver)
     initialize_tpu_system(resolver)
@@ -117,7 +116,8 @@ def initialize_tpus():
     for dev in devs:
         SP.print(dev)
     SP.leave()
-    return TPUStrategy(resolver)
+    strategy = TPUStrategy(resolver)
+    return strategy
 
 def create_dataset(seq, params):
     # Make this parameter configurable.
@@ -164,7 +164,7 @@ def do_train(train, validate, vocab_size, params):
     weights_path = params.weights_path()
     if weights_path.exists():
         SP.print(f'Loading weights from {weights_path}.')
-        model.load_weights(weights_path)
+        model.load_weights(str(weights_path))
 
     cb_best = ModelCheckpoint(
         str(weights_path),
@@ -172,7 +172,7 @@ def do_train(train, validate, vocab_size, params):
         verbose = 1,
         save_best_only = True,
         mode = 'min')
-
+    SP.print('Fitting for %d epochs.' % params.EPOCHS)
     history = model.fit(x = ds_train,
                         validation_data = ds_validate,
                         epochs = params.EPOCHS,
