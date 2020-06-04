@@ -14,11 +14,13 @@ Usage:
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         upload-file <local-file>
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
-        upload-and-run-file <local-file>
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         run-training
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         train-lstm-poly
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+        run-file -- <file> <args>...
+    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+        upload-and-run-file -- <file> <args>...
 
 Options:
     -h --help                   show this screen
@@ -72,9 +74,9 @@ def upload_file(connection, local_path):
     files = [(local_path, local_path.name)]
     upload_files(connection, files)
 
-def run_python_file(connection, root_path, file_name):
+def run_python_file(connection, root_path, file_name, args):
     cmds = prepare_commands(root_path) \
-        + ['python3 %s' % file_name]
+        + ['python3 %s %s' % (file_name, ' '.join(args))]
     script = ' && '.join(cmds)
     connection.run(script, pty = True)
 
@@ -103,29 +105,32 @@ def main():
     root_path = Path(args['--root-path'])
 
     connect_kwargs = {'password' : password}
-    connection = Connection('0.ssh.ngrok.io', 'root', port,
+    conn = Connection('0.ssh.ngrok.io', 'root', port,
                    connect_kwargs = connect_kwargs)
-    sftp = connection.sftp()
+    sftp = conn.sftp()
     remote_mkdir_safe(sftp, root_path)
     sftp.chdir(str(root_path))
     if args['get-data']:
-        get_data(connection, sftp)
+        get_data(conn, sftp)
     elif args['upload-code']:
-        upload_code(connection, sftp)
+        upload_code(conn, sftp)
     elif args['run-training']:
-        run_training(connection, root_path)
+        run_training(conn, root_path)
     elif args['upload-caches']:
         corpus_path = Path(args['<corpus-path>'])
-        upload_caches(connection, corpus_path)
+        upload_caches(conn, corpus_path)
     elif args['upload-file']:
         local_path = Path(args['<local-file>'])
-        upload_file(connection, local_path)
+        upload_file(conn, local_path)
     elif args['train-lstm-poly']:
-        train_lstm_poly(connection, root_path)
+        train_lstm_poly(conn, root_path)
     elif args['upload-and-run-file']:
-        local_path = Path(args['<local-file>'])
-        upload_file(connection, local_path)
-        run_python_file(connection, root_path, local_path.name)
+        src = Path(args['<file>'])
+        dst = src.parent
+        upload_files(conn, [(src, dst)])
+        run_python_file(conn, root_path, str(src), args['<args>'])
+    elif args['run-file']:
+        run_python_file(conn, root_path, args['<file>'], args['<args>'])
     else:
         assert False
 
