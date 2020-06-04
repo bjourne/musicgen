@@ -85,7 +85,7 @@ def prepare_commands(root_path):
 
 def run_training(connection, root_path):
     cmds = prepare_commands(root_path) \
-        + ['python3 tools/train-lstm.py -v . --pack-mycode']
+        + ['python3 tools/train-lstm.py -v . --pack-mcode']
     script = ' && '.join(cmds)
     connection.run(script, pty = True)
 

@@ -13,11 +13,11 @@ Options:
     --fraction=<float>     fraction of corpus to use [default: 1.0]
 """
 from docopt import docopt
-from musicgen.mycode import (INSN_JUMP,
-                             load_corpus,
-                             load_mod_file,
-                             mcode_to_midi_file,
-                             mcode_to_string)
+from musicgen.mcode import (INSN_JUMP,
+                            load_corpus,
+                            load_mod_file,
+                            mcode_to_midi_file,
+                            mcode_to_string)
 from musicgen.tf_utils import OneHotGenerator
 from musicgen.utils import (SP,
                             analyze_code,

@@ -1,4 +1,4 @@
-from musicgen.mycode import INSN_JUMP, mod_notes_to_mycode
+from musicgen.mcode import INSN_JUMP, mod_notes_to_mcode
 from musicgen.parser import load_file
 from musicgen.rows import linearize_rows, column_to_mod_notes
 from pathlib import Path
@@ -11,7 +11,7 @@ def test_initial_jumps_1():
 
     volumes = [64] * 32
     notes = column_to_mod_notes(rows, 3, volumes)
-    _, seq = mod_notes_to_mycode(notes, {}, len(rows), False)
+    _, seq = mod_notes_to_mcode(notes, {}, len(rows), False)
 
     n_jumps = len(rows) // 64
     assert seq == [(INSN_JUMP, 64)] * n_jumps
@@ -22,7 +22,7 @@ def test_initial_jumps_2():
 
     volumes = [64] * 32
     notes = column_to_mod_notes(rows, 3, volumes)
-    first_pitch, seq = mod_notes_to_mycode(notes, {}, len(rows), False)
+    first_pitch, seq = mod_notes_to_mcode(notes, {}, len(rows), False)
 
     silence_seq = [(INSN_JUMP, 64)] * 38 + [(INSN_JUMP, 32)]
     assert first_pitch is None

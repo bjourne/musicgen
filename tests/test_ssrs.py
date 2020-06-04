@@ -1,4 +1,4 @@
-from musicgen.mycode import INSN_JUMP
+from musicgen.mcode import INSN_JUMP
 from musicgen.ssrs import find_min_ssr
 
 def test_find_min_ssr():
