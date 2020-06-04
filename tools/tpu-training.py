@@ -1,5 +1,5 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-"""Polyphonic LSTM using TPU
+"""Polyphonic LSTM
 
 Usage:
     tpu-training.py [options] <corpus-path>
@@ -9,15 +9,14 @@ Options:
     -v --verbose           print more output
     --relative-pitches     use pcode with relative pitches
 """
-from collections import Counter
 from docopt import docopt
 from logging import ERROR
 from musicgen.pcode import (EOS_SILENCE, INSN_SILENCE,
-                            analyze_pcode,
                             load_corpus, load_mod_file,
                             pcode_to_midi_file,
                             pcode_to_string)
-from musicgen.utils import SP, file_name_for_params, find_subseq
+from musicgen.utils import (SP, analyze_code,
+                            file_name_for_params, find_subseq)
 from os import environ, listdir
 from pathlib import Path
 from random import randrange, shuffle
@@ -43,7 +42,7 @@ class ExperimentParameters:
     EMBEDDING_DIM = 32
     LSTM1_UNITS = 128
     LSTM2_UNITS = 128
-    DROPOUT = 0.1
+    DROPOUT = 0.2
     SEQ_LEN = 128
 
     def __init__(self, output_path, relative_pitches):
@@ -177,7 +176,7 @@ def do_train(train, validate, vocab_size, params):
                         validation_data = ds_validate,
                         epochs = params.EPOCHS,
                         callbacks = [cb_best],
-                        verbose = 1)
+                        verbose = 2)
     print(history)
 
 def generate_sequences(model, dataset, temperatures, seed, length):
@@ -237,7 +236,7 @@ def do_predict(seq, ix2ch, ch2ix, temperatures, params):
     SP.leave()
 
 def main():
-    args = docopt(__doc__, version = 'Train LSTM Using TPU 1.0')
+    args = docopt(__doc__, version = 'Train LSTM 1.0')
     SP.enabled = args['--verbose']
     output_path = Path(args['<corpus-path>'])
     relative_pitches = args['--relative-pitches']
@@ -249,8 +248,7 @@ def main():
     else:
         ix2ch, ch2ix, seq = load_mod_file(output_path, relative_pitches)
         output_path = Path('.')
-    analyze_pcode(ix2ch, seq)
-
+    analyze_code(ix2ch, seq)
     params = ExperimentParameters(output_path, relative_pitches)
     params.print()
 

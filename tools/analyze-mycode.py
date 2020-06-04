@@ -31,7 +31,7 @@ def analyze_mycode(mycode):
     code_counts = Counter(mycode)
     total = sum(code_counts.values())
 
-    header = ['Command', 'Argument', 'Count', 'Freq.']
+    header = ['Opcode', 'Argument', 'Count', 'Freq.']
     data = [(cmd, arg, v, '%.5f' % (v / total))
             for ((cmd, arg), v) in code_counts.items()]
     data = sorted(data)

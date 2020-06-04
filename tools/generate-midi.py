@@ -68,7 +68,6 @@ def mod_file_to_midi_file_using_mycode(mod_file, midi_file):
 
 def random_cache_location(mycode_mods, n_insns):
     long_jump_tok = INSN_JUMP, 64
-    stop_tok = INSN_PROGRAM, 0
     while True:
         i = randrange(len(mycode_mods))
         mycode_mod = mycode_mods[i]
@@ -80,7 +79,7 @@ def random_cache_location(mycode_mods, n_insns):
             continue
         k = randrange(n - n_insns)
         subseq = col[k:k + n_insns]
-        if not long_jump_tok in subseq and not stop_tok in subseq:
+        if not long_jump_tok in subseq:
             return i, j, k
 
 def cache_file_to_midi_file(cache_file, midi_file,

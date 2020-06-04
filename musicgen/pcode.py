@@ -1,14 +1,16 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
-# PCode stands for parallel code.
+# PCode stands for parallel or polyphonic code.
+from collections import Counter
 from musicgen.analyze import sample_props
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_midi_file
 from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
-from musicgen.utils import (SP, file_name_for_params,
-                            flatten,
-                            load_pickle, save_pickle, sort_groupby)
+from musicgen.utils import (SP,
+                            encode_training_sequence,
+                            file_name_for_params, flatten,
+                            load_pickle_cache, sort_groupby)
 from random import shuffle
 import numpy as np
 
@@ -31,14 +33,7 @@ EOS_SILENCE = [(INSN_SILENCE, 16)] * 4
 ########################################################################
 # Encode/Decode
 ########################################################################
-def pcode_to_string(pcode):
-    def insn_to_string(insn):
-        cmd, arg = insn
-        if cmd == INSN_PITCH:
-            return '%02d' % arg
-        return '%s%s' % (cmd, arg)
-    return ' '.join(insn_to_string(insn) for insn in pcode)
-
+# Improve this
 def guess_initial_pitch(pcode):
     diffs = [arg for (cmd, arg) in pcode if cmd == INSN_REL_PITCH]
     at_pitch, max_pitch, min_pitch = 0, 0, 0
@@ -100,6 +95,7 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
     notes_to_midi_file(notes, file_path, PCODE_MIDI_MAPPING)
     SP.leave()
 
+# Wrong location for this function.
 def guess_percussive_instruments(mod, notes):
     props = sample_props(mod, notes)
     props = [(s, p.n_notes, p.is_percussive) for (s, p) in props.items()
@@ -205,34 +201,41 @@ def test_encode_decode(mod_file, relative_pitches):
     pcode_to_midi_file(pcode, 'test.mid', relative_pitches)
 
 ########################################################################
+# Analysis and printing
+########################################################################
+def pcode_to_string(pcode):
+    def insn_to_string(insn):
+        cmd, arg = insn
+        if cmd == INSN_PITCH:
+            return '%02d' % arg
+        return '%s%s' % (cmd, arg)
+    return ' '.join(insn_to_string(insn) for insn in pcode)
+
+########################################################################
 # Cache loading
 ########################################################################
-def pcode_to_training_sequence(pcode):
-    ix2ch = sorted(set(pcode))
-    ch2ix = {c : i for i, c in enumerate(ix2ch)}
-    seq = np.array([ch2ix[ch] for ch in pcode], dtype = np.uint8)
-    return ix2ch, ch2ix, seq
-
-def load_data_from_disk(corpus_path, mods, relative_pitches):
+def build_corpus(corpus_path, mods, relative_pitches):
     file_paths = [corpus_path / mod.genre / mod.fname for mod in mods]
     pcode_per_mod = [mod_file_to_pcode(fp, relative_pitches)
                      for fp in file_paths]
     shuffle(pcode_per_mod)
     pcode = flatten(pcode_per_mod)
-    return pcode_to_training_sequence(pcode)
+    return encode_training_sequence(pcode)
 
-def load_data(corpus_path, kb_limit, relative_pitches):
+def load_corpus(corpus_path, kb_limit, rel_pitches):
     index = load_index(corpus_path)
     mods = [mod for mod in index.values()
             if (mod.n_channels == 4
                 and mod.format == 'MOD'
                 and mod.kb_size <= kb_limit)]
     size_sum = sum(mod.kb_size for mod in mods)
-    params = (size_sum, kb_limit, relative_pitches)
-    cache_file = file_name_for_params('cache_poly', 'pickle', params)
+    params = (size_sum, kb_limit, rel_pitches)
+    cache_file = file_name_for_params('cached_pcode', 'pickle', params)
     cache_path = corpus_path / cache_file
-    if not cache_path.exists():
-        SP.print('Cache file %s not found.' % cache_file)
-        obj = load_data_from_disk(corpus_path, mods, relative_pitches)
-        save_pickle(cache_path, obj)
-    return load_pickle(cache_path)
+    def rebuild_fun():
+        return build_corpus(corpus_path, mods, rel_pitches)
+    return load_pickle_cache(cache_path, rebuild_fun)
+
+def load_mod_file(mod_file, relative_pitches):
+    pcode = list(mod_file_to_pcode(mod_file, relative_pitches))
+    return pcode_to_training_sequence(pcode)

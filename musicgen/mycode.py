@@ -4,14 +4,13 @@
 from itertools import takewhile
 from musicgen.analyze import sample_props
 from musicgen.corpus import load_index
+from musicgen.generation import notes_to_midi_file
 from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import ModNote, linearize_rows, column_to_mod_notes
 from musicgen.ssrs import find_min_ssr
 from musicgen.utils import (SP,
                             file_name_for_params, find_subseq,
-                            flatten,
-                            load_pickle, save_pickle)
-from time import time
+                            flatten, load_pickle_cache)
 
 def produce_jumps(delta, do_pack):
     # Limit jumps to 8 rows to save vocabulary space.
@@ -47,7 +46,6 @@ def duration_and_jump(duration, row_delta):
 INSN_JUMP = 'J'
 INSN_DUR = 'D'
 INSN_PLAY = 'P'
-INSN_PROGRAM = 'X'
 INSN_PITCH = 'I'
 
 INSN_BLOCK = 'B'
@@ -124,45 +122,13 @@ def unpack_block(seq, top_level):
             seq2.append((cmd, arg))
     return seq2
 
-def mycode_to_mod_notes(seq, col_idx, time_ms, pitch_idx, dur):
-    n_packed = len(seq)
-    seq = unpack_block(seq, True)
-    n_after = len(seq)
-    SP.print('Unpacking %d symbols to %d.' % (n_packed, n_after))
-
-    row_idx = 0
-    notes = []
-    blocks = []
-    for i, (cmd, arg) in enumerate(seq):
-        if cmd == INSN_JUMP:
-            row_idx += arg
-        elif cmd == INSN_DUR:
-            dur = arg
-        elif cmd == INSN_PITCH:
-            pitch_idx += arg
-        elif cmd == INSN_PLAY:
-            pitch_to_use = 0
-            if arg == 1:
-                assert pitch_idx is not None
-                pitch_to_use = pitch_idx
-            note = ModNote(row_idx, col_idx,
-                           arg, pitch_to_use, 64, time_ms)
-            # I think this should work.
-            note.duration = dur
-            notes.append(note)
-            row_idx += dur
-        else:
-            assert False
-    return notes
-
 class MyCodedModule:
     def __init__(self, name, time_ms, cols):
         self.name = name
         self.time_ms = time_ms
         self.cols = cols
 
-def mod_file_to_mycode(file_path, do_pack):
-    SP.print(str(file_path))
+def mod_file_to_mcode(file_path, do_pack):
     mod = load_file(file_path)
     rows = linearize_rows(mod)
 
@@ -170,6 +136,9 @@ def mod_file_to_mycode(file_path, do_pack):
     volumes = [64] * len(mod.sample_headers)
     col_notes = [column_to_mod_notes(rows, i, volumes) for i in range(4)]
     all_notes = flatten(col_notes)
+    if not all_notes:
+        SP.print('Empty module.')
+        return None
     instruments = {}
     n_perc = 0
     for sample_idx, props in sample_props(mod, all_notes).items():
@@ -230,43 +199,87 @@ def guess_initial_pitch(seq):
 ########################################################################
 # Cache generation
 ########################################################################
-def mod_file_to_mycode_safe(fname, do_pack):
+def mod_file_to_mcode_safe(file_path, pack_mcode):
+    SP.header('PARSING %s' % str(file_path))
     try:
-        return mod_file_to_mycode(fname, do_pack)
+        mcode = mod_file_to_mcode(file_path, pack_mcode)
     except PowerPackerModule:
         SP.print('Skipping PP20 module.')
-        return None
+        mcode = None
+    SP.leave()
+    return mcode
 
-def disk_corpus_to_mycode_mods(corpus_path, mods, do_pack):
-    start = time()
+def build_corpus(corpus_path, mods, pack_mcode):
     SP.header('PARSING', '%d modules', len(mods))
     fnames = [corpus_path / mod.genre / mod.fname for mod in mods]
-    seq = [mod_file_to_mycode_safe(fname, do_pack) for fname in fnames]
+    fnames = sorted(fnames)
+    seq = [mod_file_to_mcode_safe(fname, pack_mcode) for fname in fnames]
     seq = [e for e in seq if e]
     SP.leave()
-    delta = time() - start
-    SP.print('Parsed corpus in %.2f seconds.', delta)
     return seq
 
-def corpus_to_mycode_mods(corpus_path, kb_limit, do_pack):
+def load_corpus(corpus_path, kb_limit, pack_mcode):
     index = load_index(corpus_path)
     mods = [mod for mod in index.values()
             if (mod.n_channels == 4
                 and mod.format == 'MOD'
                 and mod.kb_size <= kb_limit)]
-
     size_sum = sum(mod.kb_size for mod in mods)
-    params = (size_sum, kb_limit, do_pack)
-    cache_file = file_name_for_params('mycode_cache', 'pickle', params)
-    print(cache_file)
+    params = size_sum, kb_limit, pack_mcode
+    cache_file = file_name_for_params('cached_mcode', 'pickle', params)
     cache_path = corpus_path / cache_file
-    if not cache_path.exists():
-        seq = disk_corpus_to_mycode_mods(corpus_path, mods, do_pack)
-        SP.print('Saving MyCode cache...')
-        save_pickle(cache_path, seq)
-    else:
-        SP.print('Loading MyCode cache from %s.', cache_path)
-    return load_pickle(cache_path)
+    def rebuild_fun():
+        return build_corpus(corpus_path, mods, pack_mcode)
+    return load_pickle_cache(cache_path, rebuild_fun)
+
+########################################################################
+# Encode/Decode
+########################################################################
+def mcode_to_mod_notes(seq, col_idx, time_ms, pitch_idx, dur):
+    n_packed = len(seq)
+    seq = unpack_block(seq, True)
+    n_after = len(seq)
+    SP.print('Unpacking %d symbols to %d.' % (n_packed, n_after))
+
+    row_idx = 0
+    notes = []
+    blocks = []
+    for i, (cmd, arg) in enumerate(seq):
+        if cmd == INSN_JUMP:
+            row_idx += arg
+        elif cmd == INSN_DUR:
+            dur = arg
+        elif cmd == INSN_PITCH:
+            pitch_idx += arg
+        elif cmd == INSN_PLAY:
+            pitch_to_use = 0
+            if arg == 1:
+                assert pitch_idx is not None
+                pitch_to_use = pitch_idx
+            note = ModNote(row_idx, col_idx,
+                           arg, pitch_to_use, 64, time_ms)
+            # I think this should work.
+            note.duration = dur
+            notes.append(note)
+            row_idx += dur
+        else:
+            assert False
+    return notes
+
+MCODE_MIDI_MAPPING = {
+    1 : [1, 36, 4, 1.0],
+    2 : [-1, 40, 4, 1.0],
+    3 : [-1, 36, 4, 1.0],
+    4 : [-1, 31, 4, 1.0]
+}
+
+def mcode_to_midi_file(seq, midi_file, time_ms, pitch_idx):
+    if pitch_idx is None:
+        pitch_idx = guess_initial_pitch(seq)
+    dur = guess_initial_duration(seq)
+    notes = mcode_to_mod_notes(seq, 0, time_ms, pitch_idx, dur)
+    notes_to_midi_file(notes, midi_file, MCODE_MIDI_MAPPING)
+
 
 ########################################################################
 # Prettyprinting
@@ -279,5 +292,5 @@ def insn_to_string(insn):
         return ']R%d' % arg
     return '%s%s' % (cmd, arg)
 
-def mycode_to_string(seq):
+def mcode_to_string(seq):
     return ' '.join(insn_to_string(insn) for insn in seq)
