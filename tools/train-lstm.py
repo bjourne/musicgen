@@ -15,6 +15,7 @@ Options:
 from docopt import docopt
 from musicgen.mycode import (INSN_JUMP,
                              load_corpus,
+                             load_mod_file,
                              mcode_to_midi_file,
                              mcode_to_string)
 from musicgen.tf_utils import OneHotGenerator
@@ -128,14 +129,18 @@ def main():
     args = docopt(__doc__, version = 'Monophonic model 1.0')
     SP.enabled = args['--verbose']
 
-    corpus_path = Path(args['<corpus-path>'])
+    output_path = Path(args['<corpus-path>'])
     win_size = int(args['--win-size'])
     kb_limit = int(args['--kb-limit'])
     pack_mcode = args['--pack-mcode']
     fraction = float(args['--fraction'])
 
-    ix2ch, ch2ix, seq = flatten_corpus(corpus_path, kb_limit,
-                                       pack_mcode, fraction)
+    if output_path.is_dir():
+        ix2ch, ch2ix, seq = flatten_corpus(output_path, kb_limit,
+                                           pack_mcode, fraction)
+    else:
+        ix2ch, ch2ix, seq = load_mod_file(output_path, pack_mcode)
+        output_path = Path('.')
     analyze_code(ix2ch, seq)
 
     n_seq = len(seq)
@@ -154,7 +159,7 @@ def main():
     # Path to weights file
     params = (win_size, n_train, n_validate, pack_mcode)
     weights_file = file_name_for_params('mcode_weights', 'h5', params)
-    weights_path = corpus_path / weights_file
+    weights_path = output_path / weights_file
 
     model = make_model(win_size, vocab_size)
     if weights_path.exists():
@@ -175,7 +180,7 @@ def main():
         mode = 'min')
     def on_epoch_begin(epoch, logs):
         generate_midi_files(model, epoch, test, win_size,
-                            ch2ix, ix2ch, corpus_path)
+                            ch2ix, ix2ch, output_path)
     cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
 
     model.fit(x = train_gen,

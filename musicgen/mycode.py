@@ -1,6 +1,6 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
-# MyCode is a bad name for the internal data format I'm using.
+# mcode stands for monophonic code.
 from itertools import takewhile
 from musicgen.analyze import sample_props
 from musicgen.corpus import load_index
@@ -9,6 +9,7 @@ from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import ModNote, linearize_rows, column_to_mod_notes
 from musicgen.ssrs import find_min_ssr
 from musicgen.utils import (SP,
+                            encode_training_sequence,
                             file_name_for_params, find_subseq,
                             flatten, load_pickle_cache)
 
@@ -59,7 +60,7 @@ def bin_repeats(reps):
     return 1
 
 MIN_PACK = 4
-def pack_mycode(seq):
+def pack_mcode(seq):
     if len(seq) <= MIN_PACK:
         return seq
     start, w, reps = find_min_ssr(seq)
@@ -67,16 +68,16 @@ def pack_mycode(seq):
     if reps == 1 or reps * w < MIN_PACK:
         return seq
 
-    p1 = pack_mycode(seq[:start])
-    p2 = pack_mycode(seq[start:start + w])
-    p3 = pack_mycode(seq[start + w*reps:])
+    p1 = pack_mcode(seq[:start])
+    p2 = pack_mcode(seq[start:start + w])
+    p3 = pack_mcode(seq[start + w*reps:])
 
     block_tok = (INSN_BLOCK, 0)
     rep_tok = (INSN_REPEAT, bin_repeats(reps))
 
     return p1 + [block_tok] + p2 + [rep_tok] + p3
 
-def mod_notes_to_mycode(notes, instruments, n_rows, do_pack):
+def mod_notes_to_mcode(notes, instruments, n_rows, do_pack):
     seq = []
     first_jump = notes[0].row_idx if notes else n_rows
     for jump in produce_jumps(first_jump, do_pack):
@@ -106,7 +107,7 @@ def mod_notes_to_mycode(notes, instruments, n_rows, do_pack):
         for jump in produce_jumps(jump, do_pack):
             seq.append((INSN_JUMP, jump))
     if do_pack:
-        seq = pack_mycode(seq)
+        seq = pack_mcode(seq)
     return first_pitch, seq
 
 def unpack_block(seq, top_level):
@@ -122,7 +123,7 @@ def unpack_block(seq, top_level):
             seq2.append((cmd, arg))
     return seq2
 
-class MyCodedModule:
+class MCodedModule:
     def __init__(self, name, time_ms, cols):
         self.name = name
         self.time_ms = time_ms
@@ -150,9 +151,9 @@ def mod_file_to_mcode(file_path, do_pack):
 
     time_ms = all_notes[0].time_ms
     n_rows = len(rows)
-    cols = [mod_notes_to_mycode(notes, instruments, n_rows, do_pack)
+    cols = [mod_notes_to_mcode(notes, instruments, n_rows, do_pack)
             for notes in col_notes]
-    return MyCodedModule(file_path.name, time_ms, cols)
+    return MCodedModule(file_path.name, time_ms, cols)
 
 ########################################################################
 # Guessing logic
@@ -231,6 +232,11 @@ def load_corpus(corpus_path, kb_limit, pack_mcode):
     def rebuild_fun():
         return build_corpus(corpus_path, mods, pack_mcode)
     return load_pickle_cache(cache_path, rebuild_fun)
+
+def load_mod_file(mod_file, pack_mcode):
+    mcode = mod_file_to_mcode_safe(mod_file, pack_mcode)
+    cols = [c[1] + [(INSN_JUMP, 64)] for c in mcode.cols]
+    return encode_training_sequence(flatten(cols))
 
 ########################################################################
 # Encode/Decode
