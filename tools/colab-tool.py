@@ -16,8 +16,6 @@ Usage:
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         run-training
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
-        train-lstm-poly
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         run-file -- <file> <args>...
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         upload-and-run-file -- <file> <args>...
@@ -91,12 +89,6 @@ def run_training(connection, root_path):
     script = ' && '.join(cmds)
     connection.run(script, pty = True)
 
-def train_lstm_poly(connection, root_path):
-    cmds = prepare_commands(root_path) \
-        + ['python3 tools/train-lstm-poly.py -v .']
-    script = ' && '.join(cmds)
-    connection.run(script, pty = True)
-
 def main():
     args = docopt(__doc__, version = 'Colab Tool 1.0')
     SP.enabled = args['--verbose']
@@ -122,8 +114,6 @@ def main():
     elif args['upload-file']:
         local_path = Path(args['<local-file>'])
         upload_file(conn, local_path)
-    elif args['train-lstm-poly']:
-        train_lstm_poly(conn, root_path)
     elif args['upload-and-run-file']:
         src = Path(args['<file>'])
         dst = src.parent
