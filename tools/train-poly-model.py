@@ -16,8 +16,12 @@ from musicgen.pcode import (EOS_SILENCE, INSN_SILENCE,
                             pcode_to_midi_file,
                             pcode_to_string)
 from musicgen.utils import (SP, analyze_code,
-                            file_name_for_params, find_subseq)
-from musicgen.tf_utils import initialize_tpus
+                            file_name_for_params, find_subseq,
+                            sequence_to_batched_dataset,
+                            split_train_validate_test)
+from musicgen.tf_utils import (generate_sequences,
+                               initialize_tpus,
+                               sequence_to_batched_dataset)
 from os import listdir
 from pathlib import Path
 from random import randrange, shuffle
@@ -28,7 +32,6 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.layers import *
 from tensorflow.keras.optimizers import *
 import numpy as np
-
 
 # Hyperparameters not from the command line here.
 class ExperimentParameters:
@@ -75,7 +78,7 @@ class ExperimentParameters:
             SP.print('%-22s: %5s' % (param, value))
         SP.leave()
 
-def lstm_model(params, seq_len, vocab_size, batch_size, stateful):
+def lstm_model(params, vocab_size, batch_size, stateful):
     return Sequential([
         Embedding(
             input_dim = vocab_size,
@@ -95,26 +98,8 @@ def lstm_model(params, seq_len, vocab_size, batch_size, stateful):
             Dense(vocab_size, activation = 'softmax'))
     ])
 
-def create_dataset(seq, params):
-    # Make this parameter configurable.
-    stride = params.SEQ_LEN - 1
-    def split_input_target(chunk):
-        return chunk[:-1], chunk[1:]
-    def flatten_window(win):
-        return win.batch(params.SEQ_LEN + 1, drop_remainder = True)
-    SP.print('Length %d, seq_len %d, batch_size %d.'
-             % (len(seq), params.SEQ_LEN, params.BATCH_SIZE))
-    source = constant(seq, dtype = int32)
-    return Dataset    \
-        .from_tensor_slices(source) \
-        .window(params.SEQ_LEN + 1, stride, drop_remainder = True) \
-        .flat_map(flatten_window) \
-        .map(split_input_target) \
-        .shuffle(10000) \
-        .batch(params.BATCH_SIZE, drop_remainder = True)
-
 def create_training_model(params, vocab_size):
-    model = lstm_model(params, params.SEQ_LEN, vocab_size, None, False)
+    model = lstm_model(params, vocab_size, None, False)
     opt1 = RMSprop(learning_rate = params.LEARNING_RATE)
     model.compile(
         optimizer = opt1,
@@ -127,8 +112,12 @@ def do_train(train, validate, vocab_size, params):
     strategy = initialize_tpus()
 
     # Reshape the raw data into tensorflow Datasets
-    ds_train = create_dataset(train, params)
-    ds_validate = create_dataset(validate, params)
+    ds_train = sequence_to_batched_dataset(train,
+                                           params.SEQ_LEN,
+                                           params.BATCH_SIZE)
+    ds_validate = sequence_to_batched_dataset(validate,
+                                              params.SEQ_LEN,
+                                              params.BATCH_SIZE)
 
     if strategy:
         with strategy.scope():
@@ -156,31 +145,10 @@ def do_train(train, validate, vocab_size, params):
                         verbose = 2)
     print(history)
 
-def generate_sequences(model, temperatures, seed, length):
-    SP.header('TEMPERATURES %s' % temperatures)
-    batch_size = len(temperatures)
-
-    for i in range(seed.shape[1] - 1):
-        model.predict(seed[:, i:i + 1])
-    SP.print('Consumed seed %s.' % (seed.shape,))
-
-    preds = [seed[:, -1:]]
-    for _ in range(length):
-        last_word = preds[-1]
-        P = model.predict(last_word)[:, 0, :]
-
-        next_idx = [np.random.choice(P.shape[1], p = P[i])
-                    for i in range(batch_size)]
-        preds.append(np.asarray(next_idx, dtype = np.int32))
-
-    SP.leave()
-    return [[int(preds[j][i]) for j in range(length)]
-            for i in range(batch_size)]
-
 def do_predict(seq, ix2ch, ch2ix, temperatures, params):
     batch_size = len(temperatures)
     SP.header('%d PREDICTIONS' % batch_size)
-    model = lstm_model(params, 1, len(ix2ch), batch_size, True)
+    model = lstm_model(params, len(ix2ch), batch_size, True)
     model.load_weights(str(params.weights_path()))
     model.reset_states()
 
@@ -226,18 +194,10 @@ def main():
     params = ExperimentParameters(output_path, relative_pitches)
     params.print()
 
-    n_seq = len(seq)
     vocab_size = len(ix2ch)
 
     # Split data
-    n_train = int(n_seq * 0.8)
-    n_validate = int(n_seq * 0.1)
-    n_test = n_seq - n_train - n_validate
-    train = seq[:n_train]
-    validate = seq[n_train:n_train + n_validate]
-    test = seq[n_train + n_validate:]
-    fmt = '%d, %d, and %d tokens in train, validate, and test sequences.'
-    SP.print(fmt % (n_train, n_validate, n_test))
+    train, validate, test = split_train_validate_test(seq, 0.8, 0.1)
 
     # Run training and prediction.
     do_train(train, validate, vocab_size, params)

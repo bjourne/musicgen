@@ -45,3 +45,29 @@ def sequence_to_batched_dataset(seq, seq_len, batch_size):
         .map(split_input_target) \
         .shuffle(10000) \
         .batch(batch_size, drop_remainder = True)
+
+def generate_sequences(model, temperatures, seed, length,
+                       excluded):
+    SP.header('TEMPERATURES %s' % temperatures)
+    batch_size = len(temperatures)
+
+    # Priming the model
+    for i in range(seed.shape[1] - 1):
+        model.predict(seed[:, i:i + 1])
+
+    preds = [seed[:, -1:]]
+    eps = np.finfo('float').eps
+    for _ in range(length):
+        last_word = preds[-1]
+        Ps = model.predict(last_word)[:, 0, :]
+
+        # Assign a very low probability to tokens to be avoided.
+        Ps[:,excluded] = eps
+        Ps = (Ps.T / Ps.sum(axis = 1)).T
+
+        next_idx = [np.random.choice(len(P), p = P) for P in Ps]
+        preds.append(np.asarray(next_idx, dtype = np.int32))
+
+    SP.leave()
+    return [[int(preds[j][i]) for j in range(length)]
+            for i in range(batch_size)]

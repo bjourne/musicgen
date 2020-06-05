@@ -111,3 +111,15 @@ def analyze_code(ix2ch, seq):
         cmd, arg = ix2ch[ix]
         SP.print('%s %3d %10d' % (cmd, arg, cnt))
     SP.leave()
+
+def split_train_validate_test(seq, train_frac, validate_frac):
+    n_seq = len(seq)
+    n_train = int(n_seq * 0.8)
+    n_validate = int(n_seq * 0.1)
+    n_test = n_seq - n_train - n_validate
+    train = seq[:n_train]
+    validate = seq[n_train:n_train + n_validate]
+    test = seq[n_train + n_validate:]
+    fmt = '%d, %d, and %d tokens in train, validate, and test sequences.'
+    SP.print(fmt % (n_train, n_validate, n_test))
+    return train, validate, seq
