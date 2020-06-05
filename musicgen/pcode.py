@@ -95,7 +95,7 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
     notes_to_midi_file(notes, file_path, PCODE_MIDI_MAPPING)
     SP.leave()
 
-def mod_file_to_pcode(file_path, relative_pitches):
+def mod_file_to_pcode(file_path, rel_pitches):
     SP.header('READING %s' % file_path)
     try:
         mod = load_file(file_path)
@@ -138,7 +138,7 @@ def mod_file_to_pcode(file_path, relative_pitches):
         return at, False, n.pitch_idx - min_pitch,
     notes = sorted([note_to_event(n) for n in notes])
 
-    if relative_pitches:
+    if rel_pitches:
         # Make pitches relative
         current_pitch = None
         notes2 = []
@@ -169,7 +169,7 @@ def mod_file_to_pcode(file_path, relative_pitches):
             yield INSN_SILENCE, sil
         if is_drum:
             yield INSN_DRUM, arg
-        elif relative_pitches:
+        elif rel_pitches:
             yield INSN_REL_PITCH, arg
         else:
             yield INSN_PITCH, arg
@@ -183,9 +183,9 @@ def mod_file_to_pcode(file_path, relative_pitches):
 ########################################################################
 # Test encode and decode
 ########################################################################
-def test_encode_decode(mod_file, relative_pitches):
-    pcode = list(mod_file_to_pcode(mod_file, relative_pitches))
-    pcode_to_midi_file(pcode, 'test.mid', relative_pitches)
+def test_encode_decode(mod_file, rel_pitches):
+    pcode = list(mod_file_to_pcode(mod_file, rel_pitches))
+    pcode_to_midi_file(pcode, 'test.mid', rel_pitches)
 
 ########################################################################
 # Analysis and printing
@@ -201,9 +201,9 @@ def pcode_to_string(pcode):
 ########################################################################
 # Cache loading
 ########################################################################
-def build_corpus(corpus_path, mods, relative_pitches):
+def build_corpus(corpus_path, mods, rel_pitches):
     file_paths = [corpus_path / mod.genre / mod.fname for mod in mods]
-    pcode_per_mod = [mod_file_to_pcode(fp, relative_pitches)
+    pcode_per_mod = [mod_file_to_pcode(fp, rel_pitches)
                      for fp in file_paths]
     shuffle(pcode_per_mod)
     pcode = flatten(pcode_per_mod)
@@ -223,6 +223,6 @@ def load_corpus(corpus_path, kb_limit, rel_pitches):
         return build_corpus(corpus_path, mods, rel_pitches)
     return load_pickle_cache(cache_path, rebuild_fun)
 
-def load_mod_file(mod_file, relative_pitches):
-    pcode = list(mod_file_to_pcode(mod_file, relative_pitches))
+def load_mod_file(mod_file, rel_pitches):
+    pcode = list(mod_file_to_pcode(mod_file, rel_pitches))
     return pcode_to_training_sequence(pcode)

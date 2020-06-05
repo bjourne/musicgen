@@ -162,8 +162,8 @@ def do_train(train, validate, vocab_size, params):
               callbacks = [cb_best],
               verbose = 1)
 
-def do_predict(seq, ix2ch, ch2ix, temperatures, params):
-    batch_size = len(temperatures)
+def do_predict(seq, ix2ch, ch2ix, temps, params):
+    batch_size = len(temps)
     SP.header('%d PREDICTIONS' % batch_size)
     model = lstm_model(params, len(ix2ch), batch_size, True)
 
@@ -183,16 +183,15 @@ def do_predict(seq, ix2ch, ch2ix, temperatures, params):
     SP.print('Seed %s.' % seed_string)
 
     seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
-    seqs = generate_sequences(model, temperatures, seed, 500,
-                              long_jump_ints)
+    seqs = generate_sequences(model, temps, seed, 600, long_jump_ints)
 
     seqs = np.hstack((seed, seqs))
     seqs = [[ix2ch[ix] for ix in seq] for seq in seqs]
-    file_name_fmt = 'mono-%02d.mid'
-    for i, seq in enumerate(seqs):
-        file_name = file_name_fmt % i
+    file_name_fmt = 'mono-%.2f.mid'
+    for temp, seq in zip(temps, seqs):
+        file_name = file_name_fmt % temp
         file_path = params.output_path / file_name
-        mcode_to_midi_file(seq, file_path, 120, None)
+        mcode_to_midi_file(seq, file_path, 90, None)
     SP.leave()
 
 def main():
@@ -223,7 +222,7 @@ def main():
 
     # Run training and prediction.
     temps = [0.5, 0.8, 1.0, 1.2, 1.5]
-    do_train(train, validate, vocab_size, params)
+    #do_train(train, validate, vocab_size, params)
     do_predict(test, ix2ch, ch2ix, temps, params)
 
 if __name__ == '__main__':

@@ -73,9 +73,11 @@ class ModNote:
                                self.row_idx, self.col_idx)
 
     def __repr__(self):
-        return '%s<%d, %d, %d>' % (self.__class__.__name__,
-                                   self.row_idx, self.col_idx,
-                                   self.duration)
+        fmt = '%s<%d, %d, %d, %d, %d>'
+        return fmt % (self.__class__.__name__,
+                      self.row_idx, self.col_idx,
+                      self.sample_idx,
+                      self.pitch_idx, self.duration)
 
 
 
