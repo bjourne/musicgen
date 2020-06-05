@@ -23,8 +23,7 @@ from musicgen.utils import (SP,
                             encode_training_sequence,
                             file_name_for_params, flatten,
                             load_pickle_cache)
-from musicgen.tf_utils import (initialize_tpus,
-                               sequence_to_batched_dataset)
+from musicgen.tf_utils import initialize_tpus, sequence_to_batched_dataset
 from pathlib import Path
 from random import randrange, shuffle
 from tensorflow.keras import *
@@ -58,65 +57,6 @@ def flatten_corpus(corpus_path, kb_limit, pack_mcode, fraction):
         return encode_training_sequence(flatten(seqs))
     return load_pickle_cache(cache_path, rebuild_fun)
 
-def generate_sequence(model, S, seq_len, temp, pad_int):
-    X = np.expand_dims(S, axis = 0)
-    seq = []
-    log_lh = 0.0
-    for _ in range(seq_len):
-        P = model.predict(X, verbose = 0)[0]
-
-        # Extra precision needed to ensure np.sum(P) == 1.0.
-        P = P.astype(np.float64)
-
-        # Don't predict the long jump
-        P[pad_int] = 1e-12
-
-        # Reweigh probabilities according to temperature.
-        P = np.exp(np.log(P) / temp)
-
-        # Renormalize
-        P = P / np.sum(P)
-
-        # Faster than np.random.choice
-        Y = np.random.multinomial(1, P, 1)[0]
-        X = np.roll(X, -1, axis = 1)
-        X[0, -1] = Y
-
-        idx = np.argmax(Y)
-        seq.append(idx)
-        log_lh += np.log(P[idx])
-    return log_lh, seq
-
-def generate_midi_files(model, epoch, seq, win_size,
-                        ch2ix, ix2ch, corpus_path):
-    SP.header('EPOCH', '%d', epoch)
-    # Pick a seed that doesn't contain padding
-    pad_int = ch2ix[(INSN_JUMP, 64)]
-    while True:
-        idx = randrange(len(seq) - win_size)
-        seed = seq[idx:idx + win_size]
-        if not pad_int in seed:
-            break
-
-    # One hot seed
-    seed1h = to_categorical(seed, len(ch2ix))
-
-    # So that you can hear the transition from seed to generated data.
-    join_token = ch2ix[(INSN_JUMP, 8)]
-
-    temps = [0.2, 0.5, 1.0, 1.2, 1.5]
-    for temp in temps:
-        log_lh, seq = generate_sequence(model, seed1h, 300, temp, pad_int)
-        seq = seed.tolist() + [join_token] + seq
-        seq = [ix2ch[i] for i in seq]
-        SP.header('TEMPERATURE %.2f' % temp)
-        SP.print(mcode_to_string(seq))
-        file_name = 'gen-%03d-%.2f.mid' % (epoch, temp)
-        file_path = corpus_path / file_name
-        mcode_to_midi_file(seq, file_path, 120, None)
-        SP.leave()
-    SP.leave()
-
 def lstm_model(vocab_size, batch_size, stateful):
     return Sequential([
         Embedding(
@@ -146,7 +86,6 @@ def create_training_model(vocab_size):
         metrics = ['sparse_categorical_accuracy'])
     return model
 
-# Copy-pasta will be fixed.
 def do_train(output_path, train, validate, vocab_size):
     # Must be done before creating the datasets.
     strategy = initialize_tpus()
@@ -180,6 +119,59 @@ def do_train(output_path, train, validate, vocab_size):
               callbacks = [cb_best],
               verbose = 1)
 
+def generate_sequences(model, temperatures, seed, length):
+    SP.header('TEMPERATURES %s' % temperatures)
+    batch_size = len(temperatures)
+
+    for i in range(seed.shape[1] - 1):
+        model.predict(seed[:, i:i + 1])
+    SP.print('Consumed seed %s.' % (seed.shape,))
+
+    preds = [seed[:, -1:]]
+    for _ in range(length):
+        last_word = preds[-1]
+        P = model.predict(last_word)[:, 0, :]
+
+        next_idx = [np.random.choice(P.shape[1], p = P[i])
+                    for i in range(batch_size)]
+        preds.append(np.asarray(next_idx, dtype = np.int32))
+
+    SP.leave()
+    return [[int(preds[j][i]) for j in range(length)]
+            for i in range(batch_size)]
+
+def do_predict(output_path, seq, ix2ch, ch2ix, temperatures):
+    batch_size = len(temperatures)
+    SP.header('%d PREDICTIONS' % batch_size)
+    model = lstm_model(len(ix2ch), batch_size, True)
+
+    weights_path = output_path / 'mono_weights.h5'
+    model.load_weights(str(weights_path))
+    model.reset_states()
+
+    long_jump = ch2ix[(INSN_JUMP, 64)]
+    while True:
+        idx = randrange(len(seq) - SEQ_LEN)
+        seed = seq[idx:idx + SEQ_LEN]
+        if not long_jump in seed:
+            break
+        SP.print('Long jump in seed - skipping.')
+    seed_string = mcode_to_string(ix2ch[ix] for ix in seed)
+    SP.print('Seed %s.' % seed_string)
+
+    seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
+    seqs = generate_sequences(model, temperatures, seed, 500)
+
+    seqs = np.hstack((seed, seqs))
+    seqs = [[ix2ch[ix] for ix in seq] for seq in seqs]
+    file_name_fmt = 'mono-%02d.mid'
+    for i, seq in enumerate(seqs):
+        file_name = file_name_fmt % i
+        file_path = output_path / file_name
+        mcode_to_midi_file(seq, file_path, 120, None)
+    SP.leave()
+
+
 def main():
     args = docopt(__doc__, version = 'Monophonic model 1.0')
     SP.enabled = args['--verbose']
@@ -212,44 +204,9 @@ def main():
     SP.print(fmt % (n_train, n_validate, n_test))
 
     # Run training and prediction.
+    # do_predict(output_path, test, ix2ch, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5])
     do_train(output_path, train, validate, vocab_size)
-    do_predict(test, ix2ch, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5])
-
-    # # Path to weights file
-    # params = (win_size, n_train, n_validate, pack_mcode)
-    # weights_file = file_name_for_params('mcode_weights', 'h5', params)
-    # weights_path = output_path / weights_file
-
-    # model = make_model(win_size, vocab_size)
-    # if weights_path.exists():
-    #     SP.print(f'Loading weights from {weights_path}.')
-    #     model.load_weights(weights_path)
-    # else:
-    #     SP.print(f'Weights file {weights_path} not found.')
-
-    # batch_size = 128
-    # train_gen = OneHotGenerator(train, batch_size, win_size, vocab_size)
-    # validate_gen = OneHotGenerator(validate,
-    #                                batch_size, win_size, vocab_size)
-    # cb_checkpoint = ModelCheckpoint(
-    #     str(weights_path),
-    #     monitor = 'val_loss',
-    #     verbose = 1,
-    #     save_best_only = True,
-    #     mode = 'min')
-    # def on_epoch_begin(epoch, logs):
-    #     generate_midi_files(model, epoch, test, win_size,
-    #                         ch2ix, ix2ch, output_path)
-    # cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
-
-    # model.fit(x = train_gen,
-    #           steps_per_epoch = len(train_gen),
-    #           validation_data = validate_gen,
-    #           validation_steps = len(validate_gen),
-    #           verbose = 1,
-    #           shuffle = True,
-    #           epochs = 10,
-    #           callbacks = [cb_checkpoint, cb_generate])
+    do_predict(output_path, test, ix2ch, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5])
 
 if __name__ == '__main__':
     main()

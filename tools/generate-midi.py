@@ -25,11 +25,11 @@ from musicgen.analyze import sample_props
 from musicgen.generation import (assign_instruments,
                                  notes_to_midi_file,
                                  parse_programs)
-from musicgen.mycode import (INSN_JUMP,
-                             MCODE_MIDI_MAPPING,
-                             mcode_to_midi_file,
-                             mcode_to_mod_notes,
-                             mod_file_to_mcode)
+from musicgen.mcode import (INSN_JUMP,
+                            MCODE_MIDI_MAPPING,
+                            mcode_to_midi_file,
+                            mcode_to_mod_notes,
+                            mod_file_to_mcode)
 from musicgen.parser import load_file
 from musicgen.rows import linearize_rows, rows_to_mod_notes
 from musicgen.utils import SP, flatten, load_pickle

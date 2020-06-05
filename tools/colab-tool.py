@@ -14,8 +14,6 @@ Usage:
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         upload-file <local-file>
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
-        run-training
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         run-file -- <file> <args>...
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         upload-and-run-file -- <file> <args>...
@@ -83,12 +81,6 @@ def prepare_commands(root_path):
             f'cd "{root_path}"',
             'export PYTHONPATH="."']
 
-def run_training(connection, root_path):
-    cmds = prepare_commands(root_path) \
-        + ['python3 tools/train-lstm.py -v . --pack-mcode']
-    script = ' && '.join(cmds)
-    connection.run(script, pty = True)
-
 def main():
     args = docopt(__doc__, version = 'Colab Tool 1.0')
     SP.enabled = args['--verbose']
@@ -106,8 +98,6 @@ def main():
         get_data(conn, sftp)
     elif args['upload-code']:
         upload_code(conn, sftp)
-    elif args['run-training']:
-        run_training(conn, root_path)
     elif args['upload-caches']:
         corpus_path = Path(args['<corpus-path>'])
         upload_caches(conn, corpus_path)

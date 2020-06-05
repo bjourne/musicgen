@@ -22,8 +22,6 @@ from os import listdir
 from pathlib import Path
 from random import randrange, shuffle
 from tensorflow import constant, get_logger, int32
-from tensorflow.config import (experimental_connect_to_cluster,
-                               list_logical_devices)
 from tensorflow.data import Dataset
 from tensorflow.keras import *
 from tensorflow.keras.callbacks import ModelCheckpoint
@@ -158,7 +156,7 @@ def do_train(train, validate, vocab_size, params):
                         verbose = 2)
     print(history)
 
-def generate_sequences(model, dataset, temperatures, seed, length):
+def generate_sequences(model, temperatures, seed, length):
     SP.header('TEMPERATURES %s' % temperatures)
     batch_size = len(temperatures)
 
@@ -175,12 +173,9 @@ def generate_sequences(model, dataset, temperatures, seed, length):
                     for i in range(batch_size)]
         preds.append(np.asarray(next_idx, dtype = np.int32))
 
-    seqs = []
-    for i in range(batch_size):
-        seq = [int(preds[j][i]) for j in range(length)]
-        seqs.append(seq)
     SP.leave()
-    return seqs
+    return [[int(preds[j][i]) for j in range(length)]
+            for i in range(batch_size)]
 
 def do_predict(seq, ix2ch, ch2ix, temperatures, params):
     batch_size = len(temperatures)
@@ -199,7 +194,7 @@ def do_predict(seq, ix2ch, ch2ix, temperatures, params):
     SP.print('Seed %s.' % seed_string)
 
     seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
-    seqs = generate_sequences(model, seq, temperatures, seed, 500)
+    seqs = generate_sequences(model, temperatures, seed, 500)
     # Two bars of silence
     join = np.array([ch2ix[(INSN_SILENCE, 16)]] * 2)
     join = np.repeat(np.expand_dims(join, 0), batch_size, axis = 0)

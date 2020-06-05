@@ -3,6 +3,8 @@ from musicgen.utils import SP
 from os import environ
 from tensorflow import constant, get_logger, int32
 from tensorflow.data import Dataset
+from tensorflow.config import (experimental_connect_to_cluster,
+                               list_logical_devices)
 from tensorflow.distribute.cluster_resolver import TPUClusterResolver
 from tensorflow.distribute.experimental import TPUStrategy
 from tensorflow.keras.utils import Sequence
@@ -43,31 +45,3 @@ def sequence_to_batched_dataset(seq, seq_len, batch_size):
         .map(split_input_target) \
         .shuffle(10000) \
         .batch(batch_size, drop_remainder = True)
-
-class OneHotGenerator(Sequence):
-    def __init__(self, seq, batch_size, win_size, vocab_size):
-        self.seq = seq
-        self.batch_size = batch_size
-        self.win_size = win_size
-        self.vocab_size = vocab_size
-
-    def __len__(self):
-        n_windows = len(self.seq) - self.win_size
-        return int(np.ceil(n_windows / self.batch_size))
-
-    def __getitem__(self, i):
-        base = i * self.batch_size
-
-        # Fix running over the edge.
-        n_windows = len(self.seq) - self.win_size
-        batch_size = min(n_windows - base, self.batch_size)
-
-        X = np.zeros((batch_size, self.win_size, self.vocab_size),
-                     dtype = np.bool)
-        Y = np.zeros((batch_size, self.vocab_size),
-                     dtype = np.bool)
-        for i in range(batch_size):
-            for j in range(self.win_size):
-                X[i, j, self.seq[base + i + j]] = 1
-            Y[i, self.seq[base + i + self.win_size]] = 1
-        return X, Y
