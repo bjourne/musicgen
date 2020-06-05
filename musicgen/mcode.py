@@ -130,15 +130,21 @@ class MCodedModule:
         self.cols = cols
 
 def mod_file_to_mcode(file_path, do_pack):
-    mod = load_file(file_path)
-    rows = linearize_rows(mod)
+    SP.header('READING %s' % file_path)
+    try:
+        mod = load_file(file_path)
+    except PowerPackerModule:
+        SP.print('PowerPacker module.')
+        SP.leave()
+        return None
 
-    # Don't care about volumes
-    volumes = [64] * len(mod.sample_headers)
+    rows = linearize_rows(mod)
+    volumes = [header.volume for header in mod.sample_headers]
     col_notes = [column_to_mod_notes(rows, i, volumes) for i in range(4)]
     all_notes = flatten(col_notes)
     if not all_notes:
         SP.print('Empty module.')
+        SP.leave()
         return None
     instruments = {}
     n_perc = 0
@@ -153,6 +159,7 @@ def mod_file_to_mcode(file_path, do_pack):
     n_rows = len(rows)
     cols = [mod_notes_to_mcode(notes, instruments, n_rows, do_pack)
             for notes in col_notes]
+    SP.leave()
     return MCodedModule(file_path.name, time_ms, cols)
 
 ########################################################################
@@ -200,21 +207,11 @@ def guess_initial_pitch(seq):
 ########################################################################
 # Cache generation
 ########################################################################
-def mod_file_to_mcode_safe(file_path, pack_mcode):
-    SP.header('PARSING %s' % str(file_path))
-    try:
-        mcode = mod_file_to_mcode(file_path, pack_mcode)
-    except PowerPackerModule:
-        SP.print('Skipping PP20 module.')
-        mcode = None
-    SP.leave()
-    return mcode
-
 def build_corpus(corpus_path, mods, pack_mcode):
     SP.header('PARSING', '%d modules', len(mods))
     fnames = [corpus_path / mod.genre / mod.fname for mod in mods]
     fnames = sorted(fnames)
-    seq = [mod_file_to_mcode_safe(fname, pack_mcode) for fname in fnames]
+    seq = [mod_file_to_mcode(fname, pack_mcode) for fname in fnames]
     seq = [e for e in seq if e]
     SP.leave()
     return seq

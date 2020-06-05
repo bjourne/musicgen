@@ -18,15 +18,14 @@ from musicgen.mcode import (INSN_JUMP,
                             load_mod_file,
                             mcode_to_midi_file,
                             mcode_to_string)
-from musicgen.tf_utils import OneHotGenerator
 from musicgen.utils import (SP,
                             analyze_code,
                             encode_training_sequence,
                             file_name_for_params, flatten,
                             load_pickle_cache)
-from os import environ
+from musicgen.tf_utils import (initialize_tpus,
+                               sequence_to_batched_dataset)
 from pathlib import Path
-from pickle import dump, load
 from random import randrange, shuffle
 from tensorflow.keras import *
 from tensorflow.keras.callbacks import LambdaCallback, ModelCheckpoint
@@ -34,6 +33,11 @@ from tensorflow.keras.layers import *
 from tensorflow.keras.optimizers import *
 from tensorflow.keras.utils import Sequence, to_categorical
 import numpy as np
+
+BATCH_SIZE = 32
+SEQ_LEN = 64
+LEARNING_RATE = 0.001
+EPOCHS = 10
 
 def flatten_corpus(corpus_path, kb_limit, pack_mcode, fraction):
     mcode_mods = load_corpus(corpus_path, kb_limit, pack_mcode)
@@ -65,7 +69,7 @@ def generate_sequence(model, S, seq_len, temp, pad_int):
         P = P.astype(np.float64)
 
         # Don't predict the long jump
-        P[pad_int] = 0.0
+        P[pad_int] = 1e-12
 
         # Reweigh probabilities according to temperature.
         P = np.exp(np.log(P) / temp)
@@ -102,7 +106,7 @@ def generate_midi_files(model, epoch, seq, win_size,
 
     temps = [0.2, 0.5, 1.0, 1.2, 1.5]
     for temp in temps:
-        log_lh, seq = list(generate_sequence(model, seed1h, 300, temp))
+        log_lh, seq = generate_sequence(model, seed1h, 300, temp, pad_int)
         seq = seed.tolist() + [join_token] + seq
         seq = [ix2ch[i] for i in seq]
         SP.header('TEMPERATURE %.2f' % temp)
@@ -113,20 +117,68 @@ def generate_midi_files(model, epoch, seq, win_size,
         SP.leave()
     SP.leave()
 
-def make_model(seq_len, n_chars):
-    model = Sequential()
-    model.add(LSTM(128, return_sequences = True,
-                   input_shape = (seq_len, n_chars)))
-    model.add(Dropout(0.2))
-    model.add(LSTM(128, return_sequences = False))
-    model.add(Dropout(0.2))
-    model.add(Dense(n_chars))
-    model.add(Activation('softmax'))
-    model.compile(loss = 'categorical_crossentropy',
-                  optimizer = 'rmsprop',
-                  metrics = ['accuracy'])
-    print(model.summary())
+def lstm_model(vocab_size, batch_size, stateful):
+    return Sequential([
+        Embedding(
+            input_dim = vocab_size,
+            output_dim = 128,
+            batch_input_shape = [batch_size, None]),
+        LSTM(
+            128,
+            stateful = stateful,
+            return_sequences = True,
+            dropout = 0.2),
+        LSTM(
+            128,
+            stateful = stateful,
+            return_sequences = True,
+            dropout = 0.2),
+        TimeDistributed(
+            Dense(vocab_size, activation = 'softmax'))
+    ])
+
+def create_training_model(vocab_size):
+    model = lstm_model(vocab_size, None, False)
+    opt1 = RMSprop(learning_rate = LEARNING_RATE)
+    model.compile(
+        optimizer = opt1,
+        loss = 'sparse_categorical_crossentropy',
+        metrics = ['sparse_categorical_accuracy'])
     return model
+
+# Copy-pasta will be fixed.
+def do_train(output_path, train, validate, vocab_size):
+    # Must be done before creating the datasets.
+    strategy = initialize_tpus()
+
+    # Reshape the raw data into tensorflow Datasets
+    ds_train = sequence_to_batched_dataset(train, SEQ_LEN, BATCH_SIZE)
+    ds_validate = sequence_to_batched_dataset(validate,
+                                              SEQ_LEN, BATCH_SIZE)
+
+    if strategy:
+        with strategy.scope():
+            model = create_training_model(vocab_size)
+    else:
+        model = create_training_model(vocab_size)
+    model.summary()
+
+    weights_path = output_path / 'mono_weights.h5'
+    if weights_path.exists():
+        SP.print(f'Loading weights from {weights_path}.')
+        model.load_weights(str(weights_path))
+
+    cb_best = ModelCheckpoint(
+        str(weights_path),
+        monitor = 'val_loss',
+        verbose = 1,
+        save_best_only = True,
+        mode = 'min')
+    model.fit(x = ds_train,
+              validation_data = ds_validate,
+              epochs = EPOCHS,
+              callbacks = [cb_best],
+              verbose = 1)
 
 def main():
     args = docopt(__doc__, version = 'Monophonic model 1.0')
@@ -159,41 +211,45 @@ def main():
     fmt = '%d, %d, and %d tokens in train, validate, and test sequences.'
     SP.print(fmt % (n_train, n_validate, n_test))
 
-    # Path to weights file
-    params = (win_size, n_train, n_validate, pack_mcode)
-    weights_file = file_name_for_params('mcode_weights', 'h5', params)
-    weights_path = output_path / weights_file
+    # Run training and prediction.
+    do_train(output_path, train, validate, vocab_size)
+    do_predict(test, ix2ch, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5])
 
-    model = make_model(win_size, vocab_size)
-    if weights_path.exists():
-        SP.print(f'Loading weights from {weights_path}.')
-        model.load_weights(weights_path)
-    else:
-        SP.print(f'Weights file {weights_path} not found.')
+    # # Path to weights file
+    # params = (win_size, n_train, n_validate, pack_mcode)
+    # weights_file = file_name_for_params('mcode_weights', 'h5', params)
+    # weights_path = output_path / weights_file
 
-    batch_size = 128
-    train_gen = OneHotGenerator(train, batch_size, win_size, vocab_size)
-    validate_gen = OneHotGenerator(validate,
-                                   batch_size, win_size, vocab_size)
-    cb_checkpoint = ModelCheckpoint(
-        str(weights_path),
-        monitor = 'val_loss',
-        verbose = 1,
-        save_best_only = True,
-        mode = 'min')
-    def on_epoch_begin(epoch, logs):
-        generate_midi_files(model, epoch, test, win_size,
-                            ch2ix, ix2ch, output_path)
-    cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
+    # model = make_model(win_size, vocab_size)
+    # if weights_path.exists():
+    #     SP.print(f'Loading weights from {weights_path}.')
+    #     model.load_weights(weights_path)
+    # else:
+    #     SP.print(f'Weights file {weights_path} not found.')
 
-    model.fit(x = train_gen,
-              steps_per_epoch = len(train_gen),
-              validation_data = validate_gen,
-              validation_steps = len(validate_gen),
-              verbose = 1,
-              shuffle = True,
-              epochs = 10,
-              callbacks = [cb_checkpoint, cb_generate])
+    # batch_size = 128
+    # train_gen = OneHotGenerator(train, batch_size, win_size, vocab_size)
+    # validate_gen = OneHotGenerator(validate,
+    #                                batch_size, win_size, vocab_size)
+    # cb_checkpoint = ModelCheckpoint(
+    #     str(weights_path),
+    #     monitor = 'val_loss',
+    #     verbose = 1,
+    #     save_best_only = True,
+    #     mode = 'min')
+    # def on_epoch_begin(epoch, logs):
+    #     generate_midi_files(model, epoch, test, win_size,
+    #                         ch2ix, ix2ch, output_path)
+    # cb_generate = LambdaCallback(on_epoch_begin = on_epoch_begin)
+
+    # model.fit(x = train_gen,
+    #           steps_per_epoch = len(train_gen),
+    #           validation_data = validate_gen,
+    #           validation_steps = len(validate_gen),
+    #           verbose = 1,
+    #           shuffle = True,
+    #           epochs = 10,
+    #           callbacks = [cb_checkpoint, cb_generate])
 
 if __name__ == '__main__':
     main()

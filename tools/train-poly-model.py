@@ -17,20 +17,18 @@ from musicgen.pcode import (EOS_SILENCE, INSN_SILENCE,
                             pcode_to_string)
 from musicgen.utils import (SP, analyze_code,
                             file_name_for_params, find_subseq)
-from os import environ, listdir
+from musicgen.tf_utils import initialize_tpus
+from os import listdir
 from pathlib import Path
 from random import randrange, shuffle
 from tensorflow import constant, get_logger, int32
 from tensorflow.config import (experimental_connect_to_cluster,
                                list_logical_devices)
 from tensorflow.data import Dataset
-from tensorflow.distribute.cluster_resolver import TPUClusterResolver
-from tensorflow.distribute.experimental import TPUStrategy
 from tensorflow.keras import *
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.layers import *
 from tensorflow.keras.optimizers import *
-from tensorflow.tpu.experimental import initialize_tpu_system
 import numpy as np
 
 
@@ -50,7 +48,7 @@ class ExperimentParameters:
         self.relative_pitches = relative_pitches
 
     def weights_path(self):
-        fmt = 'weights-%03d-%03d-%.5f-%02d-%03d-%03d-%.2f-%s.h5'
+        fmt = 'poly_weights-%03d-%03d-%.5f-%02d-%03d-%03d-%.2f-%s.h5'
         args = (self.BATCH_SIZE,
                 self.EPOCHS,
                 self.LEARNING_RATE,
@@ -98,25 +96,6 @@ def lstm_model(params, seq_len, vocab_size, batch_size, stateful):
         TimeDistributed(
             Dense(vocab_size, activation = 'softmax'))
     ])
-
-def initialize_tpus():
-
-    tpu_addr = environ.get('COLAB_TPU_ADDR')
-    if not tpu_addr:
-        SP.print('TPU not configured.')
-        return None
-    SP.print('Connecting to TPU at %s.' % tpu_addr)
-    resolver = TPUClusterResolver('grpc://' + tpu_addr)
-    experimental_connect_to_cluster(resolver)
-    initialize_tpu_system(resolver)
-    devs = list_logical_devices('TPU')
-    assert len(devs) > 0
-    SP.header('%d TPU DEVICES' % len(devs))
-    for dev in devs:
-        SP.print(dev)
-    SP.leave()
-    strategy = TPUStrategy(resolver)
-    return strategy
 
 def create_dataset(seq, params):
     # Make this parameter configurable.
