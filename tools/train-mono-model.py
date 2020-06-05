@@ -54,7 +54,7 @@ def flatten_corpus(corpus_path, kb_limit, pack_mcode, fraction):
         return encode_training_sequence(flatten(seqs))
     return load_pickle_cache(cache_path, rebuild_fun)
 
-def generate_sequence(model, S, seq_len, temp):
+def generate_sequence(model, S, seq_len, temp, pad_int):
     X = np.expand_dims(S, axis = 0)
     seq = []
     log_lh = 0.0
@@ -63,6 +63,9 @@ def generate_sequence(model, S, seq_len, temp):
 
         # Extra precision needed to ensure np.sum(P) == 1.0.
         P = P.astype(np.float64)
+
+        # Don't predict the long jump
+        P[pad_int] = 0.0
 
         # Reweigh probabilities according to temperature.
         P = np.exp(np.log(P) / temp)
