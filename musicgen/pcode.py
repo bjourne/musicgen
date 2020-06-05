@@ -2,7 +2,7 @@
 #
 # PCode stands for parallel or polyphonic code.
 from collections import Counter
-from musicgen.analyze import sample_props
+from musicgen.code_utils import guess_percussive_instruments
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_midi_file
 from musicgen.parser import PowerPackerModule, load_file
@@ -94,19 +94,6 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
             last_note.duration = min(64 - row_in_page, 16)
     notes_to_midi_file(notes, file_path, PCODE_MIDI_MAPPING)
     SP.leave()
-
-# Wrong location for this function.
-def guess_percussive_instruments(mod, notes):
-    props = sample_props(mod, notes)
-    props = [(s, p.n_notes, p.is_percussive) for (s, p) in props.items()
-             if p.is_percussive]
-
-    # Sort by the number of notes so that the same instrument
-    # assignment is generated every time.
-    props = list(reversed(sorted(props, key = lambda x: x[1])))
-    percussive_samples = [s for (s, _, _) in props]
-
-    return {s : i % 3 for i, s in enumerate(percussive_samples)}
 
 def mod_file_to_pcode(file_path, relative_pitches):
     SP.header('READING %s' % file_path)

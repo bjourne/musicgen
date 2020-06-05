@@ -2,7 +2,7 @@
 #
 # mcode stands for monophonic code.
 from itertools import takewhile
-from musicgen.analyze import sample_props
+from musicgen.code_utils import guess_percussive_instruments
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_midi_file
 from musicgen.parser import PowerPackerModule, load_file
@@ -77,7 +77,7 @@ def pack_mcode(seq):
 
     return p1 + [block_tok] + p2 + [rep_tok] + p3
 
-def mod_notes_to_mcode(notes, instruments, n_rows, do_pack):
+def mod_notes_to_mcode(notes, percussion, n_rows, do_pack):
     seq = []
     first_jump = notes[0].row_idx if notes else n_rows
     for jump in produce_jumps(first_jump, do_pack):
@@ -93,9 +93,7 @@ def mod_notes_to_mcode(notes, instruments, n_rows, do_pack):
             seq.append((INSN_DUR, duration))
         last_duration = duration
 
-        instrument = instruments[note.sample_idx]
-
-        if instrument == 1:
+        if not note.sample_idx in percussion:
             if last_pitch_idx is None:
                 first_pitch = note.pitch_idx
             else:
@@ -103,6 +101,9 @@ def mod_notes_to_mcode(notes, instruments, n_rows, do_pack):
                 for pitch in produce_pitches(pitch_delta):
                     seq.append((INSN_PITCH, pitch))
             last_pitch_idx = note.pitch_idx
+            instrument = 1
+        else:
+            instrument = 2 + percussion[note.sample_idx]
         seq.append((INSN_PLAY, instrument))
         for jump in produce_jumps(jump, do_pack):
             seq.append((INSN_JUMP, jump))
@@ -146,18 +147,14 @@ def mod_file_to_mcode(file_path, do_pack):
         SP.print('Empty module.')
         SP.leave()
         return None
-    instruments = {}
-    n_perc = 0
-    for sample_idx, props in sample_props(mod, all_notes).items():
-        if not props.is_percussive:
-            instruments[sample_idx] = 1
-        else:
-            instruments[sample_idx] = 2 + n_perc
-            n_perc = (n_perc + 1) % 3
 
+    percussion = guess_percussive_instruments(mod, all_notes)
     time_ms = all_notes[0].time_ms
+    fmt = 'Row time %d ms, guessed percussion: %s.'
+    SP.print(fmt % (time_ms, percussion))
+
     n_rows = len(rows)
-    cols = [mod_notes_to_mcode(notes, instruments, n_rows, do_pack)
+    cols = [mod_notes_to_mcode(notes, percussion, n_rows, do_pack)
             for notes in col_notes]
     SP.leave()
     return MCodedModule(file_path.name, time_ms, cols)

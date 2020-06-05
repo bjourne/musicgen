@@ -46,10 +46,13 @@ def sequence_to_batched_dataset(seq, seq_len, batch_size):
         .shuffle(10000) \
         .batch(batch_size, drop_remainder = True)
 
-def generate_sequences(model, temperatures, seed, length,
+def generate_sequences(model, temps, seed, length,
                        excluded):
-    SP.header('TEMPERATURES %s' % temperatures)
-    batch_size = len(temperatures)
+    SP.header('TEMPERATURES %s' % temps)
+    batch_size = len(temps)
+
+    # Make temps into a row vector
+    temps = np.array(temps)[:,None]
 
     # Priming the model
     for i in range(seed.shape[1] - 1):
@@ -63,6 +66,11 @@ def generate_sequences(model, temperatures, seed, length,
 
         # Assign a very low probability to tokens to be avoided.
         Ps[:,excluded] = eps
+
+        # Weigh probs according to temps
+        Ps = np.exp(np.log(Ps) / temps)
+
+        # Normalize
         Ps = (Ps.T / Ps.sum(axis = 1)).T
 
         next_idx = [np.random.choice(len(P), p = P) for P in Ps]
