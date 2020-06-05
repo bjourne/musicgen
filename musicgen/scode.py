@@ -2,19 +2,34 @@
 #
 # SCode stands for simple code
 from musicgen.code_utils import guess_percussive_instruments
+from musicgen.corpus import load_index
 from musicgen.generation import notes_to_midi_file
 from musicgen.parser import PowerPackerModule, load_file
+from musicgen.pcode import pcode_to_string
 from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
-from musicgen.utils import SP, sort_groupby
+from musicgen.utils import (SP,
+                            encode_training_sequence,
+                            file_name_for_params, flatten,
+                            load_pickle_cache)
+from random import shuffle
+import numpy as np
+
+SCODE_MIDI_MAPPING = {
+    1 : [-1, 40, 4, 1.0],
+    2 : [-1, 36, 4, 1.0],
+    3 : [-1, 31, 4, 1.0],
+    4 : [1, 48, 4, 1.0]
+}
 
 INSN_PITCH = 'P'
 INSN_REL_PITCH = 'R'
 INSN_SILENCE = 'S'
 INSN_DRUM = 'D'
+MAX_COMPRESSED_SILENCE = 16
 
 def produce_silence(delta, compress_silence):
     if compress_silence:
-        delta = min(delta, 8)
+        delta = min(delta, MAX_COMPRESSED_SILENCE)
     thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
     for threshold in thresholds:
         while delta >= threshold:
@@ -68,7 +83,7 @@ def mod_file_to_scode(file_path, rel_pitches, compress_silence):
     except PowerPackerModule:
         SP.print('PowerPacker module.')
         SP.leave()
-        return
+        return None
 
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
@@ -76,7 +91,7 @@ def mod_file_to_scode(file_path, rel_pitches, compress_silence):
     if not notes:
         SP.print('Empty module.')
         SP.leave()
-        return
+        return None
 
     percussion = guess_percussive_instruments(mod, notes)
     fmt = 'Row time %d ms, guessed percussion: %s.'
@@ -87,14 +102,14 @@ def mod_file_to_scode(file_path, rel_pitches, compress_silence):
     if not pitches:
         SP.print('No melody.')
         SP.leave()
-        return
+        return None
     min_pitch = min(pitch for pitch in pitches)
     max_pitch = max(pitch for pitch in pitches)
     pitch_range = max_pitch - min_pitch
     if pitch_range >= 36:
         SP.print('Pitch range %d too large.' % pitch_range)
         SP.leave()
-        return
+        return None
 
     # Align pitches to 0 base
     for note in notes:
@@ -104,9 +119,11 @@ def mod_file_to_scode(file_path, rel_pitches, compress_silence):
     cols = [[n for n in notes if n.col_idx == i] for i in range(4)]
 
     n_rows = len(rows)
-    return [list(mod_notes_to_scode(col, n_rows, percussion,
-                                    rel_pitches, compress_silence))
-            for col in cols]
+    scode = [list(mod_notes_to_scode(col, n_rows, percussion,
+                                     rel_pitches, compress_silence))
+             for col in cols]
+    SP.leave()
+    return scode
 
 def guess_initial_pitch(scode):
     diffs = [arg for (cmd, arg) in scode if cmd == INSN_REL_PITCH]
@@ -150,30 +167,74 @@ def scode_to_mod_notes(scode, ci, rel_pitches):
         last_note.duration = min(64 - row_in_page, 16)
     return notes
 
-SCODE_MIDI_MAPPING = {
-    1 : [-1, 40, 4, 1.0],
-    2 : [-1, 36, 4, 1.0],
-    3 : [-1, 31, 4, 1.0],
-    4 : [1, 48, 4, 1.0]
-}
-
 def scode_to_midi_file(cols, file_path, rel_pitches):
-    notes = []
-    for ci, col in enumerate(cols):
-        notes.extend(scode_to_mod_notes(col, ci, rel_pitches))
+    notes = flatten([scode_to_mod_notes(col, i, rel_pitches)
+                     for (i, col) in enumerate(cols)])
 
     # Guess and set row time
     row_indices = {n.row_idx for n in notes}
     max_row = max(row_indices)
-    row_time_ms = int(160 * len(row_indices) / max_row)
+    row_time_ms = int(240 * len(row_indices) / max_row)
     for n in notes:
         n.time_ms = row_time_ms
+    fmt = 'Rel pitches: %s, guessed row time: %s.'
+    SP.print(fmt % (rel_pitches, row_time_ms))
     notes_to_midi_file(notes, file_path, SCODE_MIDI_MAPPING)
 
 def test_encode_decode(mod_file, rel_pitches):
     scode = list(mod_file_to_scode(mod_file, rel_pitches, False))
+    print(scode)
     scode_to_midi_file(scode, 'test.mid', rel_pitches)
+
+########################################################################
+# Cache loading
+########################################################################
+def pad_with_silence(cols):
+    # For now, eight bars of silence is appended to every column, but
+    # I should solve this better in the future.
+    EOS_SILENCE = [(INSN_SILENCE, MAX_COMPRESSED_SILENCE)] * 2
+    for col in cols:
+        col.extend(EOS_SILENCE)
+    return cols
+
+def build_corpus(corpus_path, mods, rel_pitches, compress_silence):
+    file_paths = [corpus_path / mod.genre / mod.fname for mod in mods]
+    scode_per_mod = [mod_file_to_scode(fp, rel_pitches, compress_silence)
+                     for fp in file_paths]
+    scode_per_mod = [cols for cols in scode_per_mod if cols]
+    cols = flatten(scode_per_mod)
+
+    avg_len = np.mean([len(c) for c in cols])
+    SP.print('Average column length %.2f.' % avg_len)
+
+    shuffle(cols)
+    cols = pad_with_silence(cols)
+    return encode_training_sequence(flatten(cols))
+
+def load_corpus(corpus_path, kb_limit, rel_pitches, compress_silence):
+    index = load_index(corpus_path)
+    mods = [mod for mod in index.values()
+            if (mod.n_channels == 4
+                and mod.format == 'MOD'
+                and mod.kb_size <= kb_limit)]
+    size_sum = sum(mod.kb_size for mod in mods)
+    params = (size_sum, kb_limit, rel_pitches, compress_silence)
+    cache_file = file_name_for_params('cached_scode', 'pickle', params)
+    cache_path = corpus_path / cache_file
+    def rebuild_fun():
+        return build_corpus(corpus_path, mods,
+                            rel_pitches, compress_silence)
+    return load_pickle_cache(cache_path, rebuild_fun)
+
+def load_mod_file(mod_file, rel_pitches, compress_silence):
+    cols = mod_file_to_scode(mod_file, rel_pitches, compress_silence)
+    cols = pad_with_silence(cols)
+    scode = flatten(cols)
+    return encode_training_sequence(scode)
 
 if __name__ == '__main__':
     from sys import argv
-    test_encode_decode(argv[1], True)
+    from pathlib import Path
+    SP.enabled = True
+    load_corpus(Path('~/musicgen').expanduser(), 150, False, True)
+    #test_encode_decode(argv[1], False)

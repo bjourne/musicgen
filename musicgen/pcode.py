@@ -80,7 +80,7 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
         n.time_ms = row_time_ms
 
     fmt = 'Rel pitches: %s, guessed row time: %s.'
-    SP.print(fmt % (relative_pitches, row_time_ms))
+    SP.print(fmt % (rel_pitches, row_time_ms))
 
     # Fix durations
     cols = sort_groupby(notes, lambda n: n.col_idx)

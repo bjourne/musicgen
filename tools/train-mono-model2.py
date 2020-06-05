@@ -1,52 +1,48 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-"""Monophonic model
+"""Monophonic model (scode)
 
 Usage:
-    train-mono-model.py [options] <corpus-path>
+    train-mono-model2.py [options] <corpus-path>
 
 Options:
     -h --help              show this screen
     -v --verbose           print more output
     --kb-limit=<int>       kb limit [default: 150]
-    --pack-mcode           use packed mcode
+    --relative-pitches     use scode with relative pitches
 """
 from docopt import docopt
-from musicgen.mcode import (INSN_JUMP,
-                            load_corpus,
+from musicgen.pcode import pcode_to_string
+from musicgen.scode import (INSN_SILENCE, load_corpus,
                             load_mod_file,
-                            mcode_to_midi_file,
-                            mcode_to_string)
-from musicgen.utils import (SP,
-                            analyze_code,
-                            encode_training_sequence,
-                            file_name_for_params, flatten,
-                            load_pickle_cache,
+                            scode_to_midi_file)
+from musicgen.utils import (SP, analyze_code,
                             split_train_validate_test)
 from musicgen.tf_utils import (generate_sequences,
                                initialize_tpus,
                                sequence_to_batched_dataset)
 from pathlib import Path
-from random import randrange, shuffle
+from random import randrange
 from tensorflow.keras import *
 from tensorflow.keras.callbacks import LambdaCallback, ModelCheckpoint
 from tensorflow.keras.layers import *
 from tensorflow.keras.optimizers import *
 import numpy as np
 
+# Hyperparameters not from the command line here.
 class ExperimentParameters:
-    BATCH_SIZE = 64
-    EPOCHS = 100
-    LEARNING_RATE = 0.001
-    EMBEDDING_DIM = 128
-    LSTM1_UNITS = 256
-    LSTM2_UNITS = 256
+    BATCH_SIZE = 2
+    EPOCHS = 10
+    LEARNING_RATE = 0.005
+    EMBEDDING_DIM = 32
+    LSTM1_UNITS = 128
+    LSTM2_UNITS = 128
     DROPOUT = 0.2
     SEQ_LEN = 128
 
-    def __init__(self, output_path, pack_mcode):
+    def __init__(self, output_path, rel_pitches):
         self.output_path = output_path
-        self.pack_mcode = pack_mcode
-        self.prefix = 'mcode'
+        self.rel_pitches = rel_pitches
+        self.prefix = 'scode'
 
     def weights_path(self):
         fmt = '%s_weights-%03d-%03d-%.5f-%02d-%03d-%03d-%.2f-%s.h5'
@@ -58,7 +54,7 @@ class ExperimentParameters:
                 self.LSTM1_UNITS,
                 self.LSTM2_UNITS,
                 self.DROPOUT,
-                self.pack_mcode)
+                self.rel_pitches)
         file_name = fmt % args
         return self.output_path / file_name
 
@@ -73,29 +69,11 @@ class ExperimentParameters:
             ('LSTM2 units', self.LSTM2_UNITS),
             ('Dropout (both layers)', self.DROPOUT),
             ('Sequence length', self.SEQ_LEN),
-            ('Pack mcode', self.pack_mcode),
+            ('Relative pitches', self.rel_pitches),
             ('Output path', self.output_path)]
         for param, value in params:
             SP.print('%-22s: %5s' % (param, value))
         SP.leave()
-
-def flatten_corpus(corpus_path, kb_limit, pack_mcode):
-    mcode_mods = load_corpus(corpus_path, kb_limit, pack_mcode)
-    n_mods = len(mcode_mods)
-    params = (n_mods, kb_limit, pack_mcode)
-    cache_file = file_name_for_params('cached_mcode_flat',
-                                      'pickle', params)
-    cache_path = corpus_path / cache_file
-
-    def rebuild_fun():
-        seqs = [[c[1] for c in mcode_mod.cols]
-                for mcode_mod in mcode_mods]
-        seqs = flatten(seqs)
-        shuffle(seqs)
-        for seq in seqs:
-            seq.append((INSN_JUMP, 64))
-        return encode_training_sequence(flatten(seqs))
-    return load_pickle_cache(cache_path, rebuild_fun)
 
 def lstm_model(params, vocab_size, batch_size, stateful):
     return Sequential([
@@ -169,20 +147,15 @@ def do_predict(seq, ix2ch, ch2ix, temps, params):
     model.load_weights(str(params.weights_path()))
     model.reset_states()
 
-    long_jump_toks = [(INSN_JUMP, 16), (INSN_JUMP, 32), (INSN_JUMP, 64)]
-    long_jump_ints = [ch2ix[insn] for insn in long_jump_toks
-                      if insn in ch2ix]
-    while True:
-        idx = randrange(len(seq) - params.SEQ_LEN)
-        seed = seq[idx:idx + params.SEQ_LEN]
-        if not set(seed) & set(long_jump_ints):
-            break
-        SP.print('Long jump in seed - skipping.')
-    seed_string = mcode_to_string(ix2ch[ix] for ix in seed)
-    SP.print('Seed %s.' % seed_string)
+    # Not sure if we should avoid silence tokens or not.
+    idx = randrange(len(seq) - params.SEQ_LEN)
+    seed = seq[idx:idx + params.SEQ_LEN]
+
+    seed_string = pcode_to_string(ix2ch[ix] for ix in seed)
+    SP.print('Seed: %s.' % seed_string)
 
     seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
-    seqs = generate_sequences(model, temps, seed, 600, long_jump_ints)
+    seqs = generate_sequences(model, temps, seed, 600, [])
 
     seqs = np.hstack((seed, seqs))
     seqs = [[ix2ch[ix] for ix in seq] for seq in seqs]
@@ -190,39 +163,35 @@ def do_predict(seq, ix2ch, ch2ix, temps, params):
     for temp, seq in zip(temps, seqs):
         file_name = file_name_fmt % (params.prefix, temp)
         file_path = params.output_path / file_name
-        scode_to_midi_file(seq, file_path, params.rel_pitches)
+        SP.print('%.2f -> %s.' % (temp, pcode_to_string(seq)))
+        scode_to_midi_file([seq], file_path, params.rel_pitches)
     SP.leave()
 
 def main():
-    args = docopt(__doc__, version = 'Monophonic model 1.0')
+    args = docopt(__doc__, version = 'Monophonic model 2.0')
     SP.enabled = args['--verbose']
-
     output_path = Path(args['<corpus-path>'])
     kb_limit = int(args['--kb-limit'])
-    pack_mcode = args['--pack-mcode']
+    rel_pitches = args['--relative-pitches']
 
     if output_path.is_dir():
-        ix2ch, ch2ix, seq = flatten_corpus(output_path, kb_limit,
-                                           pack_mcode)
+        ix2ch, ch2ix, seq = load_corpus(output_path, kb_limit,
+                                        rel_pitches, True)
     else:
-        ix2ch, ch2ix, seq = load_mod_file(output_path, pack_mcode)
+        ix2ch, ch2ix, seq = load_mod_file(output_path, rel_pitches, True)
         output_path = Path('.')
     analyze_code(ix2ch, seq)
 
     # Setup and print parameters
-    params = ExperimentParameters(output_path, pack_mcode)
+    params = ExperimentParameters(output_path, rel_pitches)
     params.print()
-
-    vocab_size = len(ix2ch)
 
     # Split data
     train, validate, test = split_train_validate_test(seq, 0.8, 0.1)
 
-    # Run training and prediction.
-    # do_train(train, validate, vocab_size, params)
+    do_train(train, validate, len(ix2ch), params)
     temps = [0.5, 0.8, 1.0, 1.2, 1.5]
     do_predict(test, ix2ch, ch2ix, temps, params)
-
 
 if __name__ == '__main__':
     main()
