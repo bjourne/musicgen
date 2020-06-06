@@ -11,8 +11,8 @@ Options:
     --relative-pitches     use scode with relative pitches
 """
 from docopt import docopt
-from musicgen.pcode import pcode_to_string
-from musicgen.scode import (INSN_SILENCE, load_corpus,
+from musicgen.code_utils import code_to_string
+from musicgen.scode import (load_corpus,
                             load_mod_file,
                             scode_to_midi_file)
 from musicgen.utils import (SP, analyze_code,
@@ -30,8 +30,8 @@ import numpy as np
 
 # Hyperparameters not from the command line here.
 class ExperimentParameters:
-    BATCH_SIZE = 2
-    EPOCHS = 10
+    BATCH_SIZE = 32
+    EPOCHS = 50
     LEARNING_RATE = 0.005
     EMBEDDING_DIM = 32
     LSTM1_UNITS = 128
@@ -137,7 +137,7 @@ def do_train(train, validate, vocab_size, params):
               validation_data = ds_validate,
               epochs = params.EPOCHS,
               callbacks = [cb_best],
-              verbose = 1)
+              verbose = 2)
 
 def do_predict(seq, ix2ch, ch2ix, temps, params):
     batch_size = len(temps)
@@ -151,7 +151,7 @@ def do_predict(seq, ix2ch, ch2ix, temps, params):
     idx = randrange(len(seq) - params.SEQ_LEN)
     seed = seq[idx:idx + params.SEQ_LEN]
 
-    seed_string = pcode_to_string(ix2ch[ix] for ix in seed)
+    seed_string = code_to_string(ix2ch[ix] for ix in seed)
     SP.print('Seed: %s.' % seed_string)
 
     seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
@@ -163,7 +163,7 @@ def do_predict(seq, ix2ch, ch2ix, temps, params):
     for temp, seq in zip(temps, seqs):
         file_name = file_name_fmt % (params.prefix, temp)
         file_path = params.output_path / file_name
-        SP.print('%.2f -> %s.' % (temp, pcode_to_string(seq)))
+        SP.print('%.2f -> %s.' % (temp, code_to_string(seq)))
         scode_to_midi_file([seq], file_path, params.rel_pitches)
     SP.leave()
 
@@ -189,7 +189,7 @@ def main():
     # Split data
     train, validate, test = split_train_validate_test(seq, 0.8, 0.1)
 
-    do_train(train, validate, len(ix2ch), params)
+    #do_train(train, validate, len(ix2ch), params)
     temps = [0.5, 0.8, 1.0, 1.2, 1.5]
     do_predict(test, ix2ch, ch2ix, temps, params)
 

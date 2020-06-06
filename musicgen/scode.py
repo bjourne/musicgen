@@ -1,11 +1,17 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # SCode stands for simple code
-from musicgen.code_utils import guess_percussive_instruments
+from musicgen.code_utils import (CODE_MIDI_MAPPING,
+                                 INSN_PITCH,
+                                 INSN_REL_PITCH,
+                                 INSN_SILENCE,
+                                 INSN_DRUM,
+                                 fix_durations,
+                                 guess_initial_pitch,
+                                 guess_percussive_instruments)
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_midi_file
 from musicgen.parser import PowerPackerModule, load_file
-from musicgen.pcode import pcode_to_string
 from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
 from musicgen.utils import (SP,
                             encode_training_sequence,
@@ -14,17 +20,6 @@ from musicgen.utils import (SP,
 from random import shuffle
 import numpy as np
 
-SCODE_MIDI_MAPPING = {
-    1 : [-1, 40, 4, 1.0],
-    2 : [-1, 36, 4, 1.0],
-    3 : [-1, 31, 4, 1.0],
-    4 : [1, 48, 4, 1.0]
-}
-
-INSN_PITCH = 'P'
-INSN_REL_PITCH = 'R'
-INSN_SILENCE = 'S'
-INSN_DRUM = 'D'
 MAX_COMPRESSED_SILENCE = 16
 
 def produce_silence(delta, compress_silence):
@@ -39,7 +34,6 @@ def produce_silence(delta, compress_silence):
 
 def mod_notes_to_scode(notes, n_rows, percussion, rel_pitches,
                        compress_silence):
-
     if rel_pitches:
         # Make pitches relative
         current_pitch = None
@@ -125,15 +119,6 @@ def mod_file_to_scode(file_path, rel_pitches, compress_silence):
     SP.leave()
     return scode
 
-def guess_initial_pitch(scode):
-    diffs = [arg for (cmd, arg) in scode if cmd == INSN_REL_PITCH]
-    at_pitch, max_pitch, min_pitch = 0, 0, 0
-    for diff in diffs:
-        at_pitch += diff
-        max_pitch = max(at_pitch, max_pitch)
-        min_pitch = min(at_pitch, min_pitch)
-    return -min_pitch
-
 def scode_to_mod_notes(scode, ci, rel_pitches):
     if rel_pitches:
         at_pitch = guess_initial_pitch(scode)
@@ -158,13 +143,7 @@ def scode_to_mod_notes(scode, ci, rel_pitches):
             ri += arg
         else:
             assert False
-    # Fix durations
-    for n1, n2 in zip(notes, notes[1:]):
-        n1.duration = min(n2.row_idx - n1.row_idx, 16)
-    if notes:
-        last_note = notes[-1]
-        row_in_page = last_note.row_idx % 64
-        last_note.duration = min(64 - row_in_page, 16)
+    fix_durations(notes)
     return notes
 
 def scode_to_midi_file(cols, file_path, rel_pitches):
@@ -179,7 +158,7 @@ def scode_to_midi_file(cols, file_path, rel_pitches):
         n.time_ms = row_time_ms
     fmt = 'Rel pitches: %s, guessed row time: %s.'
     SP.print(fmt % (rel_pitches, row_time_ms))
-    notes_to_midi_file(notes, file_path, SCODE_MIDI_MAPPING)
+    notes_to_midi_file(notes, file_path, CODE_MIDI_MAPPING)
 
 def test_encode_decode(mod_file, rel_pitches):
     scode = list(mod_file_to_scode(mod_file, rel_pitches, False))

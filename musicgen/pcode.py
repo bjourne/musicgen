@@ -2,7 +2,14 @@
 #
 # PCode stands for parallel or polyphonic code.
 from collections import Counter
-from musicgen.code_utils import guess_percussive_instruments
+from musicgen.code_utils import (CODE_MIDI_MAPPING,
+                                 INSN_PITCH,
+                                 INSN_REL_PITCH,
+                                 INSN_SILENCE,
+                                 INSN_DRUM,
+                                 fix_durations,
+                                 guess_initial_pitch,
+                                 guess_percussive_instruments)
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_midi_file
 from musicgen.parser import PowerPackerModule, load_file
@@ -14,35 +21,12 @@ from musicgen.utils import (SP,
 from random import shuffle
 import numpy as np
 
-# This order works best for zodiak_-_gasp.mod
-PCODE_MIDI_MAPPING = {
-    1 : [-1, 40, 4, 1.0],
-    2 : [-1, 36, 4, 1.0],
-    3 : [-1, 31, 4, 1.0],
-    4 : [1, 48, 4, 1.0]
-}
-
-INSN_PITCH = 'P'
-INSN_REL_PITCH = 'R'
-INSN_SILENCE = 'S'
-INSN_DRUM = 'D'
-
 # All songs end with four bars of silence
 EOS_SILENCE = [(INSN_SILENCE, 16)] * 4
 
 ########################################################################
 # Encode/Decode
 ########################################################################
-# Improve this
-def guess_initial_pitch(pcode):
-    diffs = [arg for (cmd, arg) in pcode if cmd == INSN_REL_PITCH]
-    at_pitch, max_pitch, min_pitch = 0, 0, 0
-    for diff in diffs:
-        at_pitch += diff
-        max_pitch = max(at_pitch, max_pitch)
-        min_pitch = min(at_pitch, min_pitch)
-    return -min_pitch
-
 def pcode_to_midi_file(pcode, file_path, relative_pitches):
     SP.header('WRITING %s' % file_path)
     if relative_pitches:
@@ -85,14 +69,8 @@ def pcode_to_midi_file(pcode, file_path, relative_pitches):
     # Fix durations
     cols = sort_groupby(notes, lambda n: n.col_idx)
     for _, col in cols:
-        col_notes = list(col)
-        for n1, n2 in zip(col_notes, col_notes[1:]):
-            n1.duration = min(n2.row_idx - n1.row_idx, 16)
-        if col_notes:
-            last_note = col_notes[-1]
-            row_in_page = last_note.row_idx % 64
-            last_note.duration = min(64 - row_in_page, 16)
-    notes_to_midi_file(notes, file_path, PCODE_MIDI_MAPPING)
+        fix_durations(list(col))
+    notes_to_midi_file(notes, file_path, CODE_MIDI_MAPPING)
     SP.leave()
 
 def mod_file_to_pcode(file_path, rel_pitches):
@@ -188,23 +166,13 @@ def test_encode_decode(mod_file, rel_pitches):
     pcode_to_midi_file(pcode, 'test.mid', rel_pitches)
 
 ########################################################################
-# Analysis and printing
-########################################################################
-def pcode_to_string(pcode):
-    def insn_to_string(insn):
-        cmd, arg = insn
-        if cmd == INSN_PITCH:
-            return '%02d' % arg
-        return '%s%s' % (cmd, arg)
-    return ' '.join(insn_to_string(insn) for insn in pcode)
-
-########################################################################
 # Cache loading
 ########################################################################
 def build_corpus(corpus_path, mods, rel_pitches):
     file_paths = [corpus_path / mod.genre / mod.fname for mod in mods]
     pcode_per_mod = [mod_file_to_pcode(fp, rel_pitches)
                      for fp in file_paths]
+
     shuffle(pcode_per_mod)
     pcode = flatten(pcode_per_mod)
     return encode_training_sequence(pcode)
@@ -225,4 +193,4 @@ def load_corpus(corpus_path, kb_limit, rel_pitches):
 
 def load_mod_file(mod_file, rel_pitches):
     pcode = list(mod_file_to_pcode(mod_file, rel_pitches))
-    return pcode_to_training_sequence(pcode)
+    return encode_training_sequence(pcode)
