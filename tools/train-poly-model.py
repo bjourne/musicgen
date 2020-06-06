@@ -10,14 +10,12 @@ Options:
     --relative-pitches     use pcode with relative pitches
 """
 from docopt import docopt
-from logging import ERROR
+from musicgen.code_utils import code_to_string
 from musicgen.pcode import (EOS_SILENCE, INSN_SILENCE,
                             load_corpus, load_mod_file,
-                            pcode_to_midi_file,
-                            pcode_to_string)
+                            pcode_to_midi_file)
 from musicgen.utils import (SP, analyze_code,
                             file_name_for_params, find_subseq,
-                            sequence_to_batched_dataset,
                             split_train_validate_test)
 from musicgen.tf_utils import (generate_sequences,
                                initialize_tpus,
@@ -35,7 +33,7 @@ import numpy as np
 
 # Hyperparameters not from the command line here.
 class ExperimentParameters:
-    BATCH_SIZE = 128
+    BATCH_SIZE = 32
     EPOCHS = 100
     LEARNING_RATE = 0.005
     EMBEDDING_DIM = 32
@@ -47,10 +45,12 @@ class ExperimentParameters:
     def __init__(self, output_path, relative_pitches):
         self.output_path = output_path
         self.relative_pitches = relative_pitches
+        self.prefix = 'pcode'
 
     def weights_path(self):
-        fmt = 'poly_weights-%03d-%03d-%.5f-%02d-%03d-%03d-%.2f-%s.h5'
-        args = (self.BATCH_SIZE,
+        fmt = '%s_weights-%03d-%03d-%.5f-%02d-%03d-%03d-%.2f-%s.h5'
+        args = (self.prefix,
+                self.BATCH_SIZE,
                 self.EPOCHS,
                 self.LEARNING_RATE,
                 self.EMBEDDING_DIM,
@@ -158,7 +158,7 @@ def do_predict(seq, ix2ch, ch2ix, temperatures, params):
         if not list(find_subseq(seed.tolist(), EOS_SILENCE)):
             break
         SP.print('EOS_SILENCE in seed, regenerating.')
-    seed_string = pcode_to_string(ix2ch[ix] for ix in seed)
+    seed_string = code_to_string(ix2ch[ix] for ix in seed)
     SP.print('Seed %s.' % seed_string)
 
     seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
