@@ -4,6 +4,7 @@ from os import environ
 from tensorflow.data import Dataset
 from tensorflow.config import (experimental_connect_to_cluster,
                                list_logical_devices)
+from tensorflow.distribute import OneDeviceStrategy
 from tensorflow.distribute.cluster_resolver import TPUClusterResolver
 from tensorflow.distribute.experimental import TPUStrategy
 from tensorflow.keras.utils import Sequence
@@ -11,23 +12,21 @@ from tensorflow.tpu.experimental import initialize_tpu_system
 import numpy as np
 import tensorflow as tf
 
-def initialize_tpus():
-    SP.header('INITIALIZING TPUS')
+def select_strategy():
+    SP.header('SELECTING STRATEGY')
     tpu_addr = environ.get('COLAB_TPU_ADDR')
     if not tpu_addr:
-        SP.print('TPU not found.')
+        SP.print('TPU not found, using CPU.')
         SP.leave()
-        return None
+        return OneDeviceStrategy(device = "/cpu:0")
     SP.print('TPU address: %s' % tpu_addr)
     resolver = TPUClusterResolver('grpc://' + tpu_addr)
     experimental_connect_to_cluster(resolver)
     initialize_tpu_system(resolver)
     devs = list_logical_devices('TPU')
     assert len(devs) > 0
-    SP.header('%d TPUS' % len(devs))
     for dev in devs:
         SP.print(dev)
-    SP.leave()
     strategy = TPUStrategy(resolver)
     SP.print('%d synced replicas.' % strategy.num_replicas_in_sync)
     SP.leave()
