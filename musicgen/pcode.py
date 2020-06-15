@@ -210,5 +210,5 @@ def load_corpus(corpus_path, kb_limit, rel_pitches):
 def load_mod_file(mod_file, rel_pitches):
     ch2ix, ix2ch = {}, {}
     pcode = mod_file_to_pcode(mod_file, rel_pitches)
-    ix, barr = encode_pcode(pcode, ch2ix, ix2ch)
+    _, barr = encode_pcode(list(pcode), ch2ix, ix2ch, 0)
     return ix2ch, ch2ix, barr

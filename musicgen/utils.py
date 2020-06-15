@@ -104,11 +104,11 @@ def load_pickle_cache(cache_path, rebuild_fun):
     return load_pickle(cache_path)
 
 def analyze_code(ix2ch, seq):
-    counts = Counter(seq)
-    total = sum(counts.values())
-    SP.header('%d TOKENS %d TYPES' % (total, len(counts)))
-    for ix, cnt in sorted(counts.items()):
-        cmd, arg = ix2ch[ix]
+    ix_counts = Counter(seq)
+    ch_counts = {ix2ch[ix] : cnt for (ix, cnt) in ix_counts.items()}
+    total = sum(ch_counts.values())
+    SP.header('%d TOKENS %d TYPES' % (total, len(ch_counts)))
+    for (cmd, arg), cnt in sorted(ch_counts.items()):
         SP.print('%s %3d %10d' % (cmd, arg, cnt))
     SP.leave()
 
