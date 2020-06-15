@@ -116,7 +116,9 @@ def load_file(fname):
         # Standard ones
         '4CHN', 'M.K.', 'FLT4', 'M!K!', 'M&K!',
         # Found in flight_of_grud.mod
-        'FEST'
+        'FEST',
+        # judgement_day_gvine.mod
+        'LARD'
     ]
     if not magic.isprintable():
         return ModuleSTK.parse(arr)
