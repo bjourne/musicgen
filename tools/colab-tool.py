@@ -16,7 +16,7 @@ Usage:
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
         run-file -- <file> <args>...
     colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
-        upload-and-run-file -- <file> <args>...
+        upload-and-run-file [--drop-path] -- <file> <args>...
 
 Options:
     -h --help                   show this screen
@@ -71,15 +71,11 @@ def upload_file(connection, local_path):
     upload_files(connection, files)
 
 def run_python_file(connection, root_path, file_name, args):
-    cmds = prepare_commands(root_path) \
-        + ['python3 %s %s' % (file_name, ' '.join(args))]
+    cmds = [f'cd "{root_path}"',
+            'export PYTHONPATH="."',
+            'python3 %s %s' % (file_name, ' '.join(args))]
     script = ' && '.join(cmds)
     connection.run(script, pty = True)
-
-def prepare_commands(root_path):
-    return ['pip3 install mido construct',
-            f'cd "{root_path}"',
-            'export PYTHONPATH="."']
 
 def main():
     args = docopt(__doc__, version = 'Colab Tool 1.0')
@@ -107,7 +103,12 @@ def main():
     elif args['upload-and-run-file']:
         src = Path(args['<file>'])
         dst = src.parent
+        if args['--drop-path']:
+            dst = Path('.')
         upload_files(conn, [(src, dst)])
+        if args['--drop-path']:
+            src = src.name
+
         run_python_file(conn, root_path, str(src), args['<args>'])
     elif args['run-file']:
         run_python_file(conn, root_path, args['<file>'], args['<args>'])
