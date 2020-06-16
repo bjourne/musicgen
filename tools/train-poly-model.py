@@ -17,14 +17,14 @@ from musicgen.pcode import (EOS_SILENCE, INSN_SILENCE,
 from musicgen.utils import (SP, analyze_code,
                             file_name_for_params, find_subseq,
                             split_train_validate_test)
-from musicgen.tf_utils import generate_sequences, select_strategy
+from musicgen.tf_utils import (generate_sequences,
+                               select_strategy,
+                               sequence_to_samples)
 from pathlib import Path
 from random import randrange
 from tensorflow.data import Dataset
 from tensorflow.keras import *
-from tensorflow.keras import losses
-from tensorflow.keras import metrics
-from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import *
 from tensorflow.keras.layers import *
 from tensorflow.keras.optimizers import *
 from time import time
@@ -33,13 +33,13 @@ import tensorflow as tf
 
 # Hyperparameters not from the command line here.
 class ExperimentParameters:
-    BATCH_SIZE = 32
-    EPOCHS = 120
+    BATCH_SIZE = 64
+    EPOCHS = 138
     LEARNING_RATE = 0.005
     EMBEDDING_DIM = 100
     LSTM1_UNITS = 512
     LSTM2_UNITS = 512
-    DROPOUT = 0.5
+    DROPOUT = 0.25
     SEQ_LEN = 256
 
     def __init__(self, output_path, relative_pitches):
@@ -85,7 +85,7 @@ def compute_and_apply_gradients(model, x, y):
                                    regularization_losses = model.losses)
     vars = model.trainable_variables
     grads = tape.gradient(loss, vars)
-    # grads = [tf.clip_by_norm(g, 0.5) for g in grads]
+    grads, _ = tf.clip_by_global_norm(grads, 5)
     model.optimizer.apply_gradients(zip(grads, vars))
     return y_hat
 
@@ -103,94 +103,19 @@ def create_model(params, vocab_size, batch_size, stateful):
     embedding = Embedding(input_dim = vocab_size,
                           output_dim = params.EMBEDDING_DIM)
     lstm1 = LSTM(params.LSTM1_UNITS,
-                  stateful = stateful,
-                  return_sequences = True,
-                  dropout = params.DROPOUT)
+                 stateful = stateful,
+                 return_sequences = True,
+                 dropout = params.DROPOUT,
+                 recurrent_dropout = 0.25)
     lstm2 = LSTM(params.LSTM2_UNITS,
                   stateful = stateful,
                   return_sequences = True,
-                  dropout = params.DROPOUT)
+                  dropout = params.DROPOUT,
+                 recurrent_dropout = 0.25)
     time_dist = TimeDistributed(
         Dense(vocab_size, activation = 'softmax'))
     out = time_dist(lstm2(lstm1(embedding(inp))))
     return MyModel(inputs = [inp], outputs = [out])
-
-def automatic_training(model, train, valid, batch_size, epochs, callbacks):
-    train = train.batch(batch_size, drop_remainder = True)
-    valid = valid.batch(batch_size, drop_remainder = True)
-    model.fit(x = train, validation_data = valid,
-              epochs = epochs, callbacks = callbacks,
-              verbose = 2)
-
-class LossAccObserver:
-    def __init__(self):
-        self.loss = metrics.SparseCategoricalCrossentropy()
-        self.acc = metrics.SparseCategoricalAccuracy()
-    def reset(self):
-        self.loss.reset_states()
-        self.acc.reset_states()
-    def update(self, y, y_hat):
-        self.loss.update_state(y, y_hat)
-        self.acc.update_state(y, y_hat)
-
-def distribute_dataset(strategy, dataset, batch_size):
-    def dataset_fn(ctx):
-        return dataset.batch(batch_size, drop_remainder = True)
-    return strategy.experimental_distribute_datasets_from_function(
-        dataset_fn)
-
-@tf.function
-def train_epoch(model, strategy, batch_size, ds, obs):
-    def step_fn(x, y):
-        y_hat = compute_and_apply_gradients(model, x, y)
-        obs.update(y, y_hat)
-    for x, y in ds:
-        strategy.run(step_fn, args = (x, y))
-
-@tf.function
-def evaluate_epoch(model, strategy, ds, obs):
-    def step_fn(x, y):
-        y_hat = model(x, training = False)
-        obs.update(y, y_hat)
-    for x, y in ds:
-        strategy.run(step_fn, args = (x, y))
-
-def manual_training(model, strategy, train, valid,
-                    batch_size, epochs, callbacks):
-    with strategy.scope():
-        train_obs = LossAccObserver()
-        valid_obs = LossAccObserver()
-
-    batch_size_per_replica = batch_size // strategy.num_replicas_in_sync
-    train = distribute_dataset(strategy, train, batch_size_per_replica)
-    valid = distribute_dataset(strategy, valid, batch_size_per_replica)
-
-    fmt = '\-> %3d / %3d - %4db - %3ds - %.4f / %.4f - %.2f / %.2f %s'
-    val_losses = []
-    last_time = time()
-    last_n_steps = 0
-    for i in range(epochs):
-        start = time()
-        train_epoch(model, strategy, batch_size, train, train_obs)
-        evaluate_epoch(model, strategy, valid, valid_obs)
-        new_time = time()
-        val_loss = valid_obs.loss.result()
-
-        new_n_steps = model.optimizer.iterations.numpy()
-        time_delta = new_time - last_time
-        n_steps_delta = new_n_steps - last_n_steps
-        mark = ' '
-        if val_loss < min(val_losses, default = 100):
-            mark = '*'
-        args = (i + 1, epochs, n_steps_delta, time_delta,
-                train_obs.loss.result(), val_loss,
-                train_obs.acc.result(), valid_obs.acc.result(), mark)
-        print(fmt % args)
-        last_time = new_time
-        last_n_steps = new_n_steps
-        val_losses.append(val_loss)
-        train_obs.reset()
-        valid_obs.reset()
 
 def do_predict(seq, ix2ch, ch2ix, temps, params):
     batch_size = len(temps)
@@ -210,7 +135,7 @@ def do_predict(seq, ix2ch, ch2ix, temps, params):
     SP.print('Seed %s.' % seed_string)
 
     seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
-    seqs = generate_sequences(model, temps, seed, 500, [])
+    seqs = generate_sequences(model, temps, seed, 600, [])
     # Two bars of silence
     join = np.array([ch2ix[(INSN_SILENCE, 16)]] * 2)
     join = np.repeat(np.expand_dims(join, 0), batch_size, axis = 0)
@@ -224,20 +149,6 @@ def do_predict(seq, ix2ch, ch2ix, temps, params):
         file_path = params.output_path / file_name
         pcode_to_midi_file(seq, file_path, params.relative_pitches)
     SP.leave()
-
-def sequence_to_samples(seq, seq_len):
-    stride = seq_len - 1
-    def split_input_target(chunk):
-        return chunk[:-1], chunk[1:]
-    def flatten_window(win):
-        return win.batch(seq_len + 1, drop_remainder = True)
-    source = tf.constant(seq, dtype = tf.int32)
-    return Dataset    \
-        .from_tensor_slices(source) \
-        .window(seq_len + 1, stride, drop_remainder = True) \
-        .flat_map(flatten_window) \
-        .map(split_input_target) \
-        .shuffle(10000)
 
 def main():
     # Prologue
@@ -262,20 +173,21 @@ def main():
     params = ExperimentParameters(output_path, rel_pitches)
     params.print()
 
-    # Transform data.
-    train, valid, test = split_train_validate_test(seq, 0.8, 0.1)
-    train = sequence_to_samples(train, params.SEQ_LEN)
-    valid = sequence_to_samples(valid, params.SEQ_LEN)
-
     # Create model and optimizer
     with strategy.scope():
         model = create_model(params, vocab_size, None, False)
+        #optimizer = SGD(learning_rate = params.LEARNING_RATE)
         optimizer = RMSprop(learning_rate = params.LEARNING_RATE)
         model.compile(
             optimizer = optimizer,
             loss = 'sparse_categorical_crossentropy',
             metrics = ['sparse_categorical_accuracy'])
         model.summary()
+
+    # Transform data.
+    train, valid, test = split_train_validate_test(seq, 0.8, 0.1)
+    train = sequence_to_samples(train, params.SEQ_LEN)
+    valid = sequence_to_samples(valid, params.SEQ_LEN)
 
     # Maybe load weights.
     weights_path = params.weights_path()
@@ -293,12 +205,15 @@ def main():
     # Run training and prediction.
     batch_size = params.BATCH_SIZE
     epochs = params.EPOCHS
-    callbacks = [cb_best]
-    manual_training(model, strategy, train, valid,
-                    batch_size, epochs, callbacks)
-    # automatic_training(model, train, valid,
-    #                    batch_size, epochs, callbacks)
-    # do_predict(test, ix2ch, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5], params)
+    reduce_lr = ReduceLROnPlateau('val_loss', 0.1, 8, 0.00005)
+    callbacks = [cb_best, reduce_lr]
+
+    train = train.batch(batch_size, drop_remainder = True)
+    valid = valid.batch(batch_size, drop_remainder = True)
+    model.fit(x = train, validation_data = valid,
+              epochs = epochs, callbacks = callbacks,
+              verbose = 1)
+    do_predict(test, ix2ch, ch2ix, [0.5, 0.8, 1.0, 1.2, 1.5], params)
 
 if __name__ == '__main__':
     main()
