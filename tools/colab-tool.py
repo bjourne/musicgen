@@ -5,24 +5,22 @@
 """Colab Tool
 
 Usage:
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
-        get-data
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+    colab-tool.py [-v] --authority=<s> --root-path=<s> get-data
+    colab-tool.py [-v] --authority=<s> --root-path=<s>
         upload-code
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+    colab-tool.py [-v] --authority=<s> --root-path=<s>
         upload-caches <corpus-path>
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+    colab-tool.py [-v] --authority=<s> --root-path=<s>
         upload-file <local-file>
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+    colab-tool.py [-v] --authority=<s> --root-path=<s>
         run-file -- <file> <args>...
-    colab-tool.py [-v] --port=<i> --password=<s> --root-path=<s>
+    colab-tool.py [-v] --authority=<s> --root-path=<s>
         upload-and-run-file [--drop-path] -- <file> <args>...
 
 Options:
     -h --help                   show this screen
     -v --verbose                print more output
-    --port=<i>                  port number
-    --password=<s>              password
+    --authority=<s>             user:pwd@host:port
     --root-path=<s>             path to code and data on colab
 """
 from docopt import docopt
@@ -80,13 +78,15 @@ def run_python_file(connection, root_path, file_name, args):
 def main():
     args = docopt(__doc__, version = 'Colab Tool 1.0')
     SP.enabled = args['--verbose']
-    port = int(args['--port'])
-    password = args['--password']
     root_path = Path(args['--root-path'])
+    auth = args['--authority']
+    userinfo, netloc = auth.split('@')
+    _, password = userinfo.split(':')
+    host, port = netloc.split(':')
+    port = int(port)
 
     connect_kwargs = {'password' : password}
-    conn = Connection('0.ssh.ngrok.io', 'root', port,
-                   connect_kwargs = connect_kwargs)
+    conn = Connection(host, 'root', port, connect_kwargs = connect_kwargs)
     sftp = conn.sftp()
     remote_mkdir_safe(sftp, root_path)
     sftp.chdir(str(root_path))
