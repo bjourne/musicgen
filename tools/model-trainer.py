@@ -75,20 +75,6 @@ def build_cache(path, mods, to_code_fn):
     shuffle(arrs)
     return ix2ch, ch2ix, arrs
 
-# def sequence_to_samples(seq, length):
-#     stride = length - 1
-#     def split_input_target(chunk):
-#         return chunk[:-1], chunk[1:]
-#     def flatten_window(win):
-#         return win.batch(length + 1, drop_remainder = True)
-#     source = tf.constant(seq, dtype = tf.int32)
-#     return Dataset    \
-#         .from_tensor_slices(source) \
-#         .window(length + 1, stride, drop_remainder = True) \
-#         .flat_map(flatten_window) \
-#         .map(split_input_target) \
-#         .shuffle(10000)
-
 class TrainingData:
     def __init__(self, code_type):
         if code_type not in CODE_TYPES:
@@ -148,12 +134,17 @@ class TrainingData:
         return tds
 
     def code_to_midi_file(self, seq, file_path):
-        code = [self.ix2ch[ix] for ix in seq]
-        self.info.to_midi_fn(code, file_path)
+        self.info.to_midi_fn(self.to_code(seq), file_path)
+
+    def to_seq(self, code):
+        return np.array([self.ch2ix[ch] for ch in code],
+                        dtype = np.uint8)
+
+    def to_code(self, seq):
+        return [self.ix2ch[ix] for ix in seq]
 
     def flatten(self):
-        long_pause = np.array([self.ch2ix[ch]
-                               for ch in self.info.long_pause])
+        long_pause = self.to_seq(self.info.long_pause)
         codes = [code for (_, code) in self.arrs]
         padded_codes = []
         for c in codes:
@@ -228,7 +219,7 @@ def generate_sequences(model, temps, seed, length):
     # Make temps into a row vector
     temps = np.array(temps)[:,None]
 
-    # Priming the model
+    # Prime the model
     for i in range(seed.shape[1] - 1):
         model.predict(seed[:, i:i + 1])
 
@@ -281,18 +272,19 @@ def generate_music(temps, data, path, weights_path,
 
     seq = data.flatten()
     seed_len = 128
+    long_pause = data.to_seq(data.info.long_pause).tolist()
     while True:
         idx = randrange(len(seq) - seed_len)
         seed = seq[idx:idx + seed_len]
-        if not list(find_subseq(seed.tolist(), data.info.long_pause)):
+        if not list(find_subseq(seed.tolist(), long_pause)):
             break
-        SP.print('Pause in seed, regenerating.')
-    SP.print('Seed index %d.' % idx)
+        SP.print('Long pause in seed, regenerating.')
+    SP.print('Seed %d+%d.' % (idx, seed_len))
 
     seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
     seqs = generate_sequences(model, temps, seed, 600)
 
-    join = np.array([data.ch2ix[ch] for ch in data.info.short_pause])
+    join = data.to_seq(data.info.short_pause)
     join = np.repeat(np.expand_dims(join, 0), batch_size, axis = 0)
     seqs = np.hstack((seed, join, seqs))
 
@@ -359,7 +351,7 @@ def main():
     path = Path(args['<corpus-path>'])
     code_type = args['<code-type>']
     np.set_printoptions(linewidth = 160)
-    is_generate = args['generate']
+    do_generate = args['generate']
 
     # Hyperparameters
     dropout = float(args['--dropout'])
@@ -391,7 +383,7 @@ def main():
                                     lstm1_units, lstm2_units,
                                     lr, seq_len)
     weights_path = path / weights_file
-    if is_generate:
+    if do_generate:
         temps = [0.5, 0.8, 1.0, 1.2, 1.5]
         generate_music(temps, test, path, weights_path,
                        emb_size,
