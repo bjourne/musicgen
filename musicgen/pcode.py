@@ -10,23 +10,17 @@ from musicgen.code_utils import (CODE_MIDI_MAPPING,
                                  fix_durations,
                                  guess_initial_pitch,
                                  guess_percussive_instruments)
-from musicgen.corpus import load_index
 from musicgen.generation import notes_to_midi_file
 from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
-from musicgen.utils import (SP,
-                            encode_training_sequence,
-                            file_name_for_params,
-                            load_pickle_cache, sort_groupby)
-from random import shuffle
-import numpy as np
+from musicgen.utils import SP, sort_groupby
 
-# All songs end with four bars of silence
-EOS_SILENCE = [(INSN_SILENCE, 16)] * 4
+def pcode_short_pause():
+    return [(INSN_SILENCE, 16)] * 2
 
-########################################################################
-# Encode/Decode
-########################################################################
+def pcode_long_pause():
+    return [(INSN_SILENCE, 16)] * 4
+
 def pcode_to_midi_file(pcode, file_path, rel_pitches):
     SP.header('WRITING %s' % file_path)
     if rel_pitches:
@@ -148,12 +142,6 @@ def mod_file_to_pcode(file_path, rel_pitches):
             yield INSN_PITCH, arg
         at = ofs
 
-    # We end every mod with four bars of silence
-    for insn in EOS_SILENCE:
-        yield insn
-
-
-
 ########################################################################
 # Test encode and decode
 ########################################################################
@@ -161,54 +149,7 @@ def test_encode_decode(mod_file, rel_pitches):
     pcode = list(mod_file_to_pcode(mod_file, rel_pitches))
     pcode_to_midi_file(pcode, 'test.mid', rel_pitches)
 
-########################################################################
-# Cache loading
-########################################################################
-def mod_file_to_pcode_progress(i, n, file_path, rel_pitches):
-    SP.header('[ %4d / %4d ] PARSING %s' % (i, n, file_path))
-    pcode = list(mod_file_to_pcode(file_path, rel_pitches))
-    SP.leave()
-    return pcode
-
-def encode_pcode(pcode, ch2ix, ix2ch, ix):
-    for ch in set(pcode):
-        if ch not in ch2ix:
-            ch2ix[ch] = ix
-            ix2ch[ix] = ch
-            ix += 1
-    barr = np.array([ch2ix[ch] for ch in pcode], dtype = np.uint8)
-    return ix, barr
-
-def build_corpus(corpus_path, mods, rel_pitches):
-    file_paths = [corpus_path / mod.genre / mod.fname for mod in mods]
-    n = len(file_paths)
-    ch2ix, ix2ch = {}, {}
-    ix = 0
-    barrs = []
-    for i, fp, in enumerate(sorted(file_paths)):
-        pcode = mod_file_to_pcode_progress(i + 1, n, fp, rel_pitches)
-        ix, barr = encode_pcode(pcode, ch2ix, ix2ch, ix)
-        barrs.append(barr)
-    shuffle(barrs)
-    seq = np.concatenate(barrs)
-    return ix2ch, ch2ix, seq
-
-def load_corpus(corpus_path, kb_limit, rel_pitches):
-    index = load_index(corpus_path)
-    mods = [mod for mod in index.values()
-            if (mod.n_channels == 4
-                and mod.format == 'MOD'
-                and mod.kb_size <= kb_limit)]
-    size_sum = sum(mod.kb_size for mod in mods)
-    params = (size_sum, kb_limit, rel_pitches)
-    cache_file = file_name_for_params('cached_pcode', 'pickle', params)
-    cache_path = corpus_path / cache_file
-    def rebuild_fun():
-        return build_corpus(corpus_path, mods, rel_pitches)
-    return load_pickle_cache(cache_path, rebuild_fun)
-
-def load_mod_file(mod_file, rel_pitches):
-    ch2ix, ix2ch = {}, {}
-    pcode = mod_file_to_pcode(mod_file, rel_pitches)
-    _, barr = encode_pcode(list(pcode), ch2ix, ix2ch, 0)
-    return ix2ch, ch2ix, barr
+if __name__ == '__main__':
+    from sys import argv
+    SP.enabled = True
+    test_encode_decode(argv[1], bool(argv[2]))

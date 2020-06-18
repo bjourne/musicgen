@@ -32,26 +32,21 @@ def select_strategy():
     SP.leave()
     return strategy
 
-def sequence_to_batched_dataset(seq, seq_len, batch_size):
-    stride = seq_len - 1
+def sequence_to_samples(seq, length):
+    stride = length - 1
     def split_input_target(chunk):
         return chunk[:-1], chunk[1:]
     def flatten_window(win):
-        return win.batch(seq_len + 1, drop_remainder = True)
-    SP.print('Length %d, seq_len %d, batch_size %d.'
-             % (len(seq), seq_len, batch_size))
+        return win.batch(length + 1, drop_remainder = True)
     source = tf.constant(seq, dtype = tf.int32)
     return Dataset    \
         .from_tensor_slices(source) \
-        .window(seq_len + 1, stride, drop_remainder = True) \
+        .window(length + 1, stride, drop_remainder = True) \
         .flat_map(flatten_window) \
         .map(split_input_target) \
-        .shuffle(10000) \
-        .batch(batch_size, drop_remainder = True)
+        .shuffle(10000)
 
-def generate_sequences(model, temps, seed, length,
-                       excluded):
-    SP.header('TEMPERATURES %s' % temps)
+def generate_sequences(model, temps, seed, length, excluded):
     batch_size = len(temps)
 
     # Make temps into a row vector
@@ -82,8 +77,3 @@ def generate_sequences(model, temps, seed, length,
     SP.leave()
     return [[int(preds[j][i]) for j in range(length)]
             for i in range(batch_size)]
-
-if __name__ == '__main__':
-    a = np.arange(100)
-    for e in sequence_to_batched_dataset(a, 5, 2):
-        print(e)

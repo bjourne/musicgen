@@ -114,8 +114,8 @@ def analyze_code(ix2ch, seq):
 
 def split_train_validate_test(seq, train_frac, validate_frac):
     n_seq = len(seq)
-    n_train = int(n_seq * 0.8)
-    n_validate = int(n_seq * 0.1)
+    n_train = int(n_seq * train_frac)
+    n_validate = int(n_seq * validate_frac)
     n_test = n_seq - n_train - n_validate
     train = seq[:n_train]
     validate = seq[n_train:n_train + n_validate]

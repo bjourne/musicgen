@@ -1,10 +1,12 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-"""Train ANY of the models.
+"""
+Generative MIDI models trained on MOD files
+===========================================
 
 Usage:
-    model-trainer.py [options] ( train | generate )
-        <code-type> <corpus-path>
-        --emb-size=<i> --batch-size=<i> --dropout=<f> --rec-dropout=<f>
+    model-trainer.py [options] <code-type> ( train | generate )
+        <corpus-path> --emb-size=<i> --batch-size=<i>
+        --dropout=<f> --rec-dropout=<f>
         --lstm1-units=<i> --lstm2-units=<i> --lr=<f>
         --seq-len=<i> --epochs=<i>
 
@@ -44,6 +46,10 @@ CODE_TYPES = {
     'pcode_abs' : CodeInfo(lambda m: mod_file_to_pcode(m, False),
                            lambda c, fp: pcode_to_midi_file(c, fp, False),
                            pcode_short_pause(),
+                           pcode_long_pause()),
+    'pcode_rel' : CodeInfo(lambda m: mod_file_to_pcode(m, True),
+                           lambda c, fp: pcode_to_midi_file(c, fp, True),
+                           pcode_short_pause(),
                            pcode_long_pause())
 }
 
@@ -70,6 +76,8 @@ def build_cache(path, mods, to_code_fn):
     arrs = []
     for i, p, in enumerate(sorted(mod_files)):
         code = mod_file_to_code_w_progress(i + 1, n, p, to_code_fn)
+        if not code:
+            continue
         ix, arr = encode_code(code, ch2ix, ix2ch, ix)
         arrs.append((p.name, arr))
     shuffle(arrs)
@@ -229,18 +237,18 @@ def generate_sequences(model, temps, seed, length):
         Ps = model.predict(last_word)[:, 0, :]
         Ps = softmax(Ps).numpy()
 
-        # Weigh probs according to temps
-        Ps = np.exp(np.log(Ps) / temps)
+        # # Weigh probs according to temps
+        # Ps = np.exp(np.log(Ps) / temps)
 
-        # Normalize
-        Ps = (Ps.T / Ps.sum(axis = 1)).T
+        # # Normalize
+        # Ps = (Ps.T / Ps.sum(axis = 1)).T
 
         next_ixs = []
-        for P in Ps:
+        for P, t in zip(Ps, temps):
             # Magic nucleus sampling.
             ixs = np.argsort(-P)
             PC = np.cumsum(P[ixs])
-            top_n = len(PC[PC <= 0.9]) + 1
+            top_n = len(PC[PC <= t]) + 1
 
             # Clear the prob of those who didn't make it.
             P[ixs[top_n:]] = 0.0
@@ -325,19 +333,14 @@ def train_model(weights_path, epochs,
         save_weights_only = True,
         save_best_only = True,
         mode = 'min')
-    reduce_lr = ReduceLROnPlateau('val_loss', 0.1, 8, 0.00005)
+    reduce_lr = ReduceLROnPlateau(
+        factor = 0.2, patience = 8, min_lr = lr / 100)
     callbacks = [cb_best, reduce_lr]
     SP.print('Batching samples...')
     train_ds = train.to_samples(seq_len) \
         .batch(batch_size, drop_remainder = True)
     valid_ds = valid.to_samples(seq_len) \
         .batch(batch_size, drop_remainder = True)
-
-    SP.print('Counting samples...')
-    n_train = sum(1 for _ in train_ds)
-    n_valid = sum(1 for _ in valid_ds)
-    fmt = '%d training and %d validation batches.'
-    SP.print(fmt % (n_train, n_valid))
 
     model.fit(x = train_ds,
               validation_data = valid_ds,
@@ -384,7 +387,8 @@ def main():
                                     lr, seq_len)
     weights_path = path / weights_file
     if do_generate:
-        temps = [0.5, 0.8, 1.0, 1.2, 1.5]
+        temps = [0.7, 0.8, 0.9, 0.95, 0.99]
+        #temps = [0.5, 0.8, 1.0, 1.2, 1.5]
         generate_music(temps, test, path, weights_path,
                        emb_size,
                        dropout, rec_dropout,
