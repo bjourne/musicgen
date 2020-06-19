@@ -1,8 +1,8 @@
-from musicgen.mcode import INSN_JUMP
+from musicgen.code_utils import INSN_SILENCE
 from musicgen.ssrs import find_min_ssr
 
 def test_find_min_ssr():
-    silence_seq = [(INSN_JUMP, 64)] * 38 + [(INSN_JUMP, 32)]
+    silence_seq = [(INSN_SILENCE, 64)] * 38 + [(INSN_SILENCE, 32)]
     examples = [
         ('EEEFGAFFGAFFGAFCD', (3, 4, 3)),
         ('ACCCCCCCCCA', (1, 1, 9)),
