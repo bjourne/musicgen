@@ -24,6 +24,10 @@ from musicgen.pcode import (mod_file_to_pcode,
                             pcode_to_midi_file,
                             pcode_short_pause,
                             pcode_long_pause)
+from musicgen.scode import (mod_file_to_scode,
+                            scode_to_midi_file,
+                            scode_short_pause,
+                            scode_long_pause)
 from musicgen.utils import (SP, file_name_for_params,
                             find_subseq, load_pickle_cache)
 from musicgen.tf_utils import select_strategy, sequence_to_samples
@@ -36,6 +40,7 @@ from tensorflow.keras.layers import *
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.optimizers import *
 from tensorflow.nn import softmax
+from time import time
 import numpy as np
 import tensorflow as tf
 
@@ -50,7 +55,15 @@ CODE_TYPES = {
     'pcode_rel' : CodeInfo(lambda m: mod_file_to_pcode(m, True),
                            lambda c, fp: pcode_to_midi_file(c, fp, True),
                            pcode_short_pause(),
-                           pcode_long_pause())
+                           pcode_long_pause()),
+    'scode_abs' : CodeInfo(lambda m: mod_file_to_scode(m, False),
+                           lambda c, fp: scode_to_midi_file(c, fp, False),
+                           scode_short_pause(),
+                           scode_long_pause()),
+    'scode_rel' : CodeInfo(lambda m: mod_file_to_scode(m, True),
+                           lambda c, fp: scode_to_midi_file(c, fp, True),
+                           scode_short_pause(),
+                           scode_long_pause())
 }
 
 def encode_code(code, ch2ix, ix2ch, ix):
@@ -64,7 +77,7 @@ def encode_code(code, ch2ix, ix2ch, ix):
 
 def mod_file_to_code_w_progress(i, n, mod_file, to_code_fn):
     SP.header('[ %4d / %4d ] PARSING %s' % (i, n, mod_file))
-    code = list(to_code_fn(mod_file))
+    code = to_code_fn(mod_file)
     SP.leave()
     return code
 
@@ -78,7 +91,7 @@ def build_cache(path, mods, to_code_fn):
         code = mod_file_to_code_w_progress(i + 1, n, p, to_code_fn)
         if not code:
             continue
-        ix, arr = encode_code(code, ch2ix, ix2ch, ix)
+        ix, arr = encode_code(list(code), ch2ix, ix2ch, ix)
         arrs.append((p.name, arr))
     shuffle(arrs)
     return ix2ch, ch2ix, arrs
@@ -221,86 +234,108 @@ def get_weights_file(code_type, epochs,
     fmt = 'weights_%s-%03d-%03d-%03d-%.2f-%.2f-%03d-%03d-%.5f-%03d.h5'
     return fmt % args
 
-def generate_sequences(model, temps, seed, length):
-    batch_size = len(temps)
-
-    # Make temps into a row vector
-    temps = np.array(temps)[:,None]
-
+def generate_sequences(model, temps, top_ps, seed, n_samples):
     # Prime the model
     for i in range(seed.shape[1] - 1):
         model.predict(seed[:, i:i + 1])
 
     preds = [seed[:, -1:]]
-    for _ in range(length):
+    start = time()
+    n_temps = len(temps)
+    n_top_ps = len(top_ps)
+
+    SP.print('Predicting %d tokens.' % n_samples)
+    for _ in range(n_samples):
         last_word = preds[-1]
         Ps = model.predict(last_word)[:, 0, :]
         Ps = softmax(Ps).numpy()
 
-        # # Weigh probs according to temps
-        # Ps = np.exp(np.log(Ps) / temps)
+        # First temperature weighing
+        ixs = []
+        for i in range(n_temps):
+            P = np.exp(np.log(Ps[i]) / temps[i])
+            P = P / P.sum()
+            ixs.append(np.random.choice(len(P), p = P))
 
-        # # Normalize
-        # Ps = (Ps.T / Ps.sum(axis = 1)).T
+        # Then top-p sampling
+        for i in range(n_top_ps):
+            P = Ps[i + n_temps]
+            prob_ixs = np.argsort(-P)
 
-        next_ixs = []
-        for P, t in zip(Ps, temps):
-            # Magic nucleus sampling.
-            ixs = np.argsort(-P)
-            PC = np.cumsum(P[ixs])
-            top_n = len(PC[PC <= t]) + 1
+            PC = np.cumsum(P[prob_ixs])
+            top_n = len(PC[PC <= top_ps[i]]) + 1
 
             # Clear the prob of those who didn't make it.
-            P[ixs[top_n:]] = 0.0
+            P[prob_ixs[top_n:]] = 0.0
 
-            # Rescale.
             P = P / P.sum()
 
-            next_ixs.append(np.random.choice(len(P), p = P))
+            ixs.append(np.random.choice(len(P), p = P))
 
-        preds.append(np.asarray(next_ixs, dtype = np.int32))
+        preds.append(np.array(ixs, dtype = np.int32))
+    elapsed = time() - start
+    SP.print('Predicted %d tokens in %.2fs.' % (n_samples, elapsed))
 
     SP.leave()
-    return [[int(preds[j][i]) for j in range(length)]
-            for i in range(batch_size)]
+    return [[int(preds[j][i]) for j in range(n_samples)]
+            for i in range(n_temps + n_top_ps)]
 
-def generate_music(temps, data, path, weights_path,
+def generate_music(temps, top_ps, data, path, weights_path,
                    emb_size,
                    dropout, rec_dropout,
                    lstm1_units, lstm2_units):
 
-    batch_size = len(temps)
-    SP.header('%d PREDICTIONS' % batch_size)
-    model = create_model(len(data.ix2ch), emb_size, batch_size,
+    n_temps = len(temps)
+    n_top_ps = len(top_ps)
+    n_preds = n_temps + n_top_ps
+
+    # Often more than one full song - not great.
+    n_samples = 400
+    n_seed = 128
+
+    SP.header('%d PREDICTIONS' % n_preds)
+    model = create_model(len(data.ix2ch), emb_size, n_preds,
                          dropout, rec_dropout,
                          lstm1_units, lstm2_units,
                          True)
     model.load_weights(str(weights_path))
     model.reset_states()
-
     seq = data.flatten()
-    seed_len = 128
     long_pause = data.to_seq(data.info.long_pause).tolist()
+
     while True:
-        idx = randrange(len(seq) - seed_len)
-        seed = seq[idx:idx + seed_len]
+        idx = randrange(len(seq) - n_seed - n_samples)
+        seed = seq[idx:idx + n_seed]
         if not list(find_subseq(seed.tolist(), long_pause)):
             break
         SP.print('Long pause in seed, regenerating.')
-    SP.print('Seed %d+%d.' % (idx, seed_len))
+    SP.print('Seed %d+%d.' % (idx, n_seed))
 
-    seed = np.repeat(np.expand_dims(seed, 0), batch_size, axis = 0)
-    seqs = generate_sequences(model, temps, seed, 600)
+    seed = np.repeat(np.expand_dims(seed, 0), n_preds, axis = 0)
+    seqs = generate_sequences(model, temps, top_ps, seed, n_samples)
 
-    join = data.to_seq(data.info.short_pause)
-    join = np.repeat(np.expand_dims(join, 0), batch_size, axis = 0)
+    # Add the original
+    seqs.append(seq[idx + n_seed:idx + n_seed + n_samples])
+    seqs = np.array(seqs)
+    seed = np.vstack((seed, seed[0]))
+
+    join = data.to_seq(data.info.long_pause)
+    join = np.repeat(np.expand_dims(join, 0), len(seqs), axis = 0)
+    print(seed.shape, join.shape, seqs.shape)
     seqs = np.hstack((seed, join, seqs))
 
-    fmt = '%s_out-%.2f.mid'
-    for temp, seq in zip(temps, seqs):
-        file_name = fmt % (data.code_type, temp)
+    for i in range(n_temps):
+        file_name = '%s-t-%.2f.mid' % (data.code_type, temps[i])
         file_path = path / file_name
-        data.code_to_midi_file(seq, file_path)
+        data.code_to_midi_file(seqs[i], file_path)
+
+    for i in range(n_top_ps):
+        file_name = '%s-p-%.2f.mid' % (data.code_type, top_ps[i])
+        file_path = path / file_name
+        data.code_to_midi_file(seqs[n_temps + i], file_path)
+
+    file_path = path / ('%s-orig.mid' % data.code_type)
+    data.code_to_midi_file(seqs[-1], file_path)
     SP.leave()
 
 def train_model(weights_path, epochs,
@@ -387,9 +422,10 @@ def main():
                                     lr, seq_len)
     weights_path = path / weights_file
     if do_generate:
-        temps = [0.7, 0.8, 0.9, 0.95, 0.99]
-        #temps = [0.5, 0.8, 1.0, 1.2, 1.5]
-        generate_music(temps, test, path, weights_path,
+        temps = [0.8, 1.0, 1.05, 1.15, 1.3]
+        top_ps = [0.7, 0.8, 0.9, 0.95, 0.99]
+        generate_music(temps, top_ps,
+                       test, path, weights_path,
                        emb_size,
                        dropout, rec_dropout,
                        lstm1_units, lstm2_units)
