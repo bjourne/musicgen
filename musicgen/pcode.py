@@ -1,7 +1,6 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # PCode stands for parallel or polyphonic code.
-from collections import Counter
 from musicgen.code_utils import (CODE_MIDI_MAPPING,
                                  INSN_PITCH,
                                  INSN_REL_PITCH,
