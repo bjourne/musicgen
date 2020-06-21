@@ -103,15 +103,6 @@ def load_pickle_cache(cache_path, rebuild_fun):
         SP.print('Loading cache from %s.' % cache_path)
     return load_pickle(cache_path)
 
-def analyze_code(ix2ch, seq):
-    ix_counts = Counter(seq)
-    ch_counts = {ix2ch[ix] : cnt for (ix, cnt) in ix_counts.items()}
-    total = sum(ch_counts.values())
-    SP.header('%d TOKENS %d TYPES' % (total, len(ch_counts)))
-    for (cmd, arg), cnt in sorted(ch_counts.items()):
-        SP.print('%s %3d %10d' % (cmd, arg, cnt))
-    SP.leave()
-
 def split_train_validate_test(seq, train_frac, validate_frac):
     n_seq = len(seq)
     n_train = int(n_seq * train_frac)
@@ -123,3 +114,27 @@ def split_train_validate_test(seq, train_frac, validate_frac):
     fmt = '%d, %d, and %d tokens in train, validate, and test sequences.'
     SP.print(fmt % (n_train, n_validate, n_test))
     return train, validate, seq
+
+class CharEncoder:
+    def __init__(self):
+        self.ch2ix = {}
+        self.ix2ch = {}
+        self.next_idx = 0
+
+    def decode_char(self, ix):
+        return self.ix2ch[ix]
+
+    def decode_chars(self, seq):
+        return [self.decode_char(ix) for ix in seq]
+
+    def encode_char(self, ch, add_missing):
+        if ch not in self.ch2ix:
+            if not add_missing:
+                raise ValueError('%s missing!' % ch)
+            self.ch2ix[ch] = self.next_idx
+            self.ix2ch[self.next_idx] = ch
+            self.next_idx += 1
+        return self.ch2ix[ch]
+
+    def encode_chars(self, chars, add_missing):
+        return [self.encode_char(ch, add_missing) for ch in chars]

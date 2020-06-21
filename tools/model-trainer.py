@@ -28,9 +28,10 @@ from musicgen.scode import (mod_file_to_scode,
                             scode_to_midi_file,
                             scode_short_pause,
                             scode_long_pause)
-from musicgen.utils import (SP, file_name_for_params,
-                            find_subseq, load_pickle_cache)
 from musicgen.tf_utils import select_strategy, sequence_to_samples
+from musicgen.utils import (SP, CharEncoder,
+                            file_name_for_params,
+                            find_subseq, flatten, load_pickle_cache)
 from pathlib import Path
 from random import randrange, shuffle
 from tensorflow.data import Dataset
@@ -66,35 +67,37 @@ CODE_TYPES = {
                            scode_long_pause())
 }
 
-def encode_code(code, ch2ix, ix2ch, ix):
-    for ch in set(code):
-        if ch not in ch2ix:
-            ch2ix[ch] = ix
-            ix2ch[ix] = ch
-            ix += 1
-    barr = np.array([ch2ix[ch] for ch in code], dtype = np.uint8)
-    return ix, barr
-
 def mod_file_to_code_w_progress(i, n, mod_file, to_code_fn):
     SP.header('[ %4d / %4d ] PARSING %s' % (i, n, mod_file))
     code = to_code_fn(mod_file)
     SP.leave()
     return code
 
-def build_cache(path, mods, to_code_fn):
+def build_cache(path, shuffle_file, mods, to_code_fn):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
     n = len(mod_files)
-    ch2ix, ix2ch = {}, {}
-    ix = 0
+
+    # Cache the shuffle to make trained models more comparable.
+    shuffle_path = path / shuffle_file
+    def rebuild_fn():
+        indices = list(range(n))
+        shuffle(indices)
+        return indices
+    indices = load_pickle_cache(shuffle_path, rebuild_fn)
+
+    encoder = CharEncoder()
     arrs = []
     for i, p, in enumerate(sorted(mod_files)):
         code = mod_file_to_code_w_progress(i + 1, n, p, to_code_fn)
         if not code:
             continue
-        ix, arr = encode_code(list(code), ch2ix, ix2ch, ix)
-        arrs.append((p.name, arr))
-    shuffle(arrs)
-    return ix2ch, ch2ix, arrs
+        arrs.append((p.name, encoder.encode_chars(code, True)))
+
+    # Shuffle according to indices.
+    tmp = [(i, e) for (i, e) in zip(indices, arrs)]
+    arrs = [e for (_, e) in sorted(tmp)]
+
+    return encoder, arrs
 
 class TrainingData:
     def __init__(self, code_type):
@@ -109,28 +112,29 @@ class TrainingData:
         mods = [mod for mod in index.values()
                 if (mod.n_channels == 4
                     and mod.format == 'MOD'
-                    and mod.kb_size <= kb_limit)]
+                    and mod.kb_size <= kb_limit)][:200]
         size_sum = sum(mod.kb_size for mod in mods)
         real_prefix = 'cache_%s' % self.code_type
         params = size_sum, kb_limit
         cache_file = file_name_for_params(real_prefix, 'pickle', params)
         cache_path = path / cache_file
+        shuffle_file = file_name_for_params('shuffle', 'pickle', params)
         def rebuild_fn():
-            return build_cache(path, mods, self.info.to_code_fn)
-        self.ix2ch, self.ch2ix, self.arrs =  \
+            return build_cache(path, shuffle_file, mods,
+                               self.info.to_code_fn)
+        self.encoder, self.arrs = \
             load_pickle_cache(cache_path, rebuild_fn)
 
     def load_mod_file(self, p):
-        self.ch2ix, self.ix2ch = {}, {}
         code = mod_file_to_code_w_progress(1, 1, p, self.info.to_code_fn)
-        _, arr = encode_code(code, self.ch2ix, self.ix2ch, 0)
-        self.arrs = [(p.name, arr)]
+        self.encoder = CharEncoder()
+        self.arrs = [(p.name, self.encoder.encode_chars(code, True))]
 
     def print_historgram(self):
         codes = [arr for (name, arr) in self.arrs]
         seq = np.concatenate(codes)
         ix_counts = Counter(seq)
-        ch_counts = {self.ix2ch[ix] : cnt
+        ch_counts = {self.encoder.decode_char(ix) : cnt
                      for (ix, cnt) in ix_counts.items()}
         total = sum(ch_counts.values())
         SP.header('%d TOKENS %d TYPES' % (total, len(ch_counts)))
@@ -150,27 +154,16 @@ class TrainingData:
         tds = [TrainingData(self.code_type) for _ in range(3)]
         for td, part in zip(tds, parts):
             td.arrs = part
-            td.ch2ix = self.ch2ix
-            td.ix2ch = self.ix2ch
+            td.encoder = self.encoder
         return tds
 
     def code_to_midi_file(self, seq, file_path):
-        self.info.to_midi_fn(self.to_code(seq), file_path)
-
-    def to_seq(self, code):
-        return np.array([self.ch2ix[ch] for ch in code],
-                        dtype = np.uint8)
-
-    def to_code(self, seq):
-        return [self.ix2ch[ix] for ix in seq]
+        code = self.encoder.decode_chars(seq)
+        self.info.to_midi_fn(code, file_path)
 
     def flatten(self):
-        long_pause = self.to_seq(self.info.long_pause)
-        codes = [code for (_, code) in self.arrs]
-        padded_codes = []
-        for c in codes:
-            padded_codes.append(c)
-            padded_codes.append(long_pause)
+        pause = self.encoder.encode_chars(self.info.long_pause, False)
+        padded_codes = flatten([[c, pause] for (_, c) in self.arrs])
         return np.concatenate(padded_codes)
 
     def to_samples(self, length):
@@ -301,7 +294,9 @@ def generate_music(temps, top_ps, data, path, weights_path,
     model.load_weights(str(weights_path))
     model.reset_states()
     seq = data.flatten()
-    long_pause = data.to_seq(data.info.long_pause).tolist()
+    long_pause = data.info.long_pause
+    long_pause = data.encoder.encode_chars(long_pause, False)
+    long_pause = long_pause.tolist()
 
     while True:
         idx = randrange(len(seq) - n_seed - n_samples)
@@ -319,8 +314,7 @@ def generate_music(temps, top_ps, data, path, weights_path,
     seqs = np.array(seqs)
     seed = np.vstack((seed, seed[0]))
 
-    join = data.to_seq(data.info.long_pause)
-    join = np.repeat(np.expand_dims(join, 0), len(seqs), axis = 0)
+    join = np.repeat(np.expand_dims(long_pause, 0), len(seqs), axis = 0)
     print(seed.shape, join.shape, seqs.shape)
     seqs = np.hstack((seed, join, seqs))
 
@@ -345,7 +339,7 @@ def train_model(weights_path, epochs,
                 lstm1_units, lstm2_units, lr, seq_len):
     strategy = select_strategy()
     with strategy.scope():
-        vocab_size = len(train.ix2ch)
+        vocab_size = len(train.encoder.ix2ch)
         model = create_model(vocab_size, emb_size, None,
                              dropout, rec_dropout,
                              lstm1_units, lstm2_units, False)
