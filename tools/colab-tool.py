@@ -73,6 +73,7 @@ def run_python_file(connection, root_path, file_name, args):
             'export PYTHONPATH="."',
             'python3 %s %s' % (file_name, ' '.join(args))]
     script = ' && '.join(cmds)
+    SP.print('Running %s...' % file_name)
     connection.run(script, pty = True)
 
 def main():
