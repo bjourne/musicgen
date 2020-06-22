@@ -137,4 +137,5 @@ class CharEncoder:
         return self.ch2ix[ch]
 
     def encode_chars(self, chars, add_missing):
-        return [self.encode_char(ch, add_missing) for ch in chars]
+        seq = [self.encode_char(ch, add_missing) for ch in chars]
+        return np.array(seq, dtype = np.uint8)
