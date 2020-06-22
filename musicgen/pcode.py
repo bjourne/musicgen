@@ -10,7 +10,7 @@ from musicgen.code_utils import (CODE_MIDI_MAPPING,
                                  guess_initial_pitch,
                                  guess_percussive_instruments)
 from musicgen.generation import notes_to_midi_file
-from musicgen.parser import PowerPackerModule, load_file
+from musicgen.parser import load_file
 from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
 from musicgen.utils import SP, sort_groupby
 
@@ -66,36 +66,56 @@ def pcode_to_midi_file(pcode, file_path, rel_pitches):
     notes_to_midi_file(notes, file_path, CODE_MIDI_MAPPING)
     SP.leave()
 
-def mod_file_to_pcode(file_path, rel_pitches):
-    try:
-        mod = load_file(file_path)
-    except PowerPackerModule:
-        SP.print('PowerPacker module.')
-        return
+# Pretty weird code but it is isolated.
+def is_pcode_learnable(pcode):
+    n_toks = len(pcode)
+    if n_toks < 64:
+        SP.print('To few tokens, %d.' % n_toks)
+        return False
 
+    notes = [(c, a) for (c, a) in pcode if c != INSN_SILENCE]
+    n_notes = len(notes)
+    if n_notes < 8:
+        SP.print('To few notes, %d.' % n_notes)
+        return False
+    mel_notes_abs = [a for (c, a) in pcode if c == INSN_PITCH]
+    mel_notes_rel = [a for (c, a) in pcode if c == INSN_REL_PITCH]
+
+    rel_pitches = True if mel_notes_rel else False
+    mel_notes = mel_notes_rel if rel_pitches else mel_notes_abs
+
+    n_unique_notes = len(set(mel_notes))
+    if n_unique_notes < 3:
+        SP.print('To few unique melodic notes, %d.' % n_unique_notes)
+        return False
+    at = 0
+    lo, hi = 0, 0
+    for mel_note in mel_notes:
+        if rel_pitches:
+            at += mel_note
+        else:
+            at = mel_note
+        lo = min(at, lo)
+        hi = max(at, hi)
+    pitch_range = hi - lo
+    if pitch_range >= 36:
+        SP.print('Pitch range %d too large.' % pitch_range)
+        return False
+    return True
+
+def mod_to_pcode(mod, rel_pitches):
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = rows_to_mod_notes(rows, volumes)
-    if not notes:
-        SP.print('Empty module.')
-        return
 
     percussion = guess_percussive_instruments(mod, notes)
-    fmt = 'Row time %d ms, guessed percussion: %s.'
-    SP.print(fmt % (notes[0].time_ms, percussion))
+    if notes:
+        fmt = 'Row time %d ms, guessed percussion: %s.'
+        SP.print(fmt % (notes[0].time_ms, percussion))
 
     pitches = {n.pitch_idx for n in notes
                if n.sample_idx not in percussion}
-    if not pitches:
-        SP.print('No melody.')
-        return
-    min_pitch = min(pitch for pitch in pitches)
-    max_pitch = max(pitch for pitch in pitches)
-    pitch_range = max_pitch - min_pitch
-    if pitch_range >= 36:
-        SP.print('Pitch range %d too large.' % pitch_range)
-        return
-
+    min_pitch = min(pitches, default = 0)
     def note_to_event(n):
         si = n.sample_idx
         at = 4 * n.row_idx + n.col_idx
@@ -145,10 +165,13 @@ def mod_file_to_pcode(file_path, rel_pitches):
 # Test encode and decode
 ########################################################################
 def test_encode_decode(mod_file, rel_pitches):
-    pcode = list(mod_file_to_pcode(mod_file, rel_pitches))
+    mod = load_file(mod_file)
+    pcode = list(mod_to_pcode(mod, rel_pitches))
+    print(pcode)
+    print(is_pcode_learnable(pcode))
     pcode_to_midi_file(pcode, 'test.mid', rel_pitches)
 
 if __name__ == '__main__':
     from sys import argv
     SP.enabled = True
-    test_encode_decode(argv[1], bool(argv[2]))
+    test_encode_decode(argv[1], bool(int(argv[2])))

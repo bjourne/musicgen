@@ -20,7 +20,9 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from collections import Counter, namedtuple
 from docopt import docopt
 from musicgen.corpus import load_index
-from musicgen.pcode import (mod_file_to_pcode,
+from musicgen.parser import PowerPackerModule, load_file
+from musicgen.pcode import (is_pcode_learnable,
+                            mod_to_pcode,
                             pcode_to_midi_file,
                             pcode_short_pause,
                             pcode_long_pause)
@@ -46,34 +48,46 @@ import numpy as np
 import tensorflow as tf
 
 CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_midi_fn',
-                                    'short_pause', 'long_pause'])
+                                   'short_pause', 'long_pause',
+                                   'is_learnable_fn'])
 
 CODE_TYPES = {
-    'pcode_abs' : CodeInfo(lambda m: mod_file_to_pcode(m, False),
+    'pcode_abs' : CodeInfo(lambda m: mod_to_pcode(m, False),
                            lambda c, fp: pcode_to_midi_file(c, fp, False),
                            pcode_short_pause(),
-                           pcode_long_pause()),
-    'pcode_rel' : CodeInfo(lambda m: mod_file_to_pcode(m, True),
+                           pcode_long_pause(),
+                           is_pcode_learnable),
+    'pcode_rel' : CodeInfo(lambda m: mod_to_pcode(m, True),
                            lambda c, fp: pcode_to_midi_file(c, fp, True),
                            pcode_short_pause(),
-                           pcode_long_pause()),
+                           pcode_long_pause(),
+                           is_pcode_learnable),
     'scode_abs' : CodeInfo(lambda m: mod_file_to_scode(m, False),
                            lambda c, fp: scode_to_midi_file(c, fp, False),
                            scode_short_pause(),
-                           scode_long_pause()),
+                           scode_long_pause(),
+                           None),
     'scode_rel' : CodeInfo(lambda m: mod_file_to_scode(m, True),
                            lambda c, fp: scode_to_midi_file(c, fp, True),
                            scode_short_pause(),
-                           scode_long_pause())
+                           scode_long_pause(),
+                           None)
 }
 
-def mod_file_to_code_w_progress(i, n, mod_file, to_code_fn):
-    SP.header('[ %4d / %4d ] PARSING %s' % (i, n, mod_file))
-    code = to_code_fn(mod_file)
+def mod_file_to_code_w_progress(i, n, file_path, info):
+    SP.header('[ %4d / %4d ] PARSING %s' % (i, n, file_path))
+    try:
+        mod = load_file(file_path)
+    except PowerPackerModule:
+        SP.print('PowerPacker module.')
+        return None
+    code = list(info.to_code_fn(mod))
+    if not info.is_learnable_fn(code):
+        code = None
     SP.leave()
     return code
 
-def build_cache(path, shuffle_file, mods, to_code_fn):
+def build_cache(path, shuffle_file, mods, info):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
     n = len(mod_files)
 
@@ -88,7 +102,7 @@ def build_cache(path, shuffle_file, mods, to_code_fn):
     encoder = CharEncoder()
     arrs = []
     for i, p, in enumerate(sorted(mod_files)):
-        code = mod_file_to_code_w_progress(i + 1, n, p, to_code_fn)
+        code = mod_file_to_code_w_progress(i + 1, n, p, info)
         if not code:
             continue
         arrs.append((p.name, encoder.encode_chars(code, True)))
@@ -112,7 +126,7 @@ class TrainingData:
         mods = [mod for mod in index.values()
                 if (mod.n_channels == 4
                     and mod.format == 'MOD'
-                    and mod.kb_size <= kb_limit)][:200]
+                    and mod.kb_size <= kb_limit)]
         size_sum = sum(mod.kb_size for mod in mods)
         real_prefix = 'cache_%s' % self.code_type
         params = size_sum, kb_limit
@@ -120,10 +134,9 @@ class TrainingData:
         cache_path = path / cache_file
         shuffle_file = file_name_for_params('shuffle', 'pickle', params)
         def rebuild_fn():
-            return build_cache(path, shuffle_file, mods,
-                               self.info.to_code_fn)
-        self.encoder, self.arrs = \
-            load_pickle_cache(cache_path, rebuild_fn)
+            return build_cache(path, shuffle_file, mods, self.info)
+        data = load_pickle_cache(cache_path, rebuild_fn)
+        self.encoder, self.arrs = data
 
     def load_mod_file(self, p):
         code = mod_file_to_code_w_progress(1, 1, p, self.info.to_code_fn)
@@ -163,8 +176,12 @@ class TrainingData:
 
     def flatten(self):
         pause = self.encoder.encode_chars(self.info.long_pause, False)
-        padded_codes = flatten([[c, pause] for (_, c) in self.arrs])
-        return np.concatenate(padded_codes)
+        padded = []
+        for name, arr in self.arrs:
+            if len(arr) > 0:
+                padded.append(arr)
+                padded.append(pause)
+        return np.concatenate(padded)
 
     def to_samples(self, length):
         seq = self.flatten()
@@ -177,7 +194,8 @@ def compute_and_apply_gradients(model, x, y):
                                    regularization_losses = model.losses)
     vars = model.trainable_variables
     grads = tape.gradient(loss, vars)
-    grads, _ = tf.clip_by_global_norm(grads, 5)
+    #grads = [tf.clip_by_value(g, -1, 1) for g in grads]
+    grads, _ = tf.clip_by_global_norm(grads, 15)
     model.optimizer.apply_gradients(zip(grads, vars))
     return y_hat
 
@@ -287,7 +305,7 @@ def generate_music(temps, top_ps, data, path, weights_path,
     n_seed = 128
 
     SP.header('%d PREDICTIONS' % n_preds)
-    model = create_model(len(data.ix2ch), emb_size, n_preds,
+    model = create_model(len(data.encoder.ix2ch), emb_size, n_preds,
                          dropout, rec_dropout,
                          lstm1_units, lstm2_units,
                          True)
@@ -364,7 +382,8 @@ def train_model(weights_path, epochs,
         mode = 'min')
     reduce_lr = ReduceLROnPlateau(
         factor = 0.2, patience = 8, min_lr = lr / 100)
-    callbacks = [cb_best, reduce_lr]
+    stopping = EarlyStopping(patience = 30)
+    callbacks = [cb_best, reduce_lr, stopping]
     SP.print('Batching samples...')
     train_ds = train.to_samples(seq_len) \
         .batch(batch_size, drop_remainder = True)
