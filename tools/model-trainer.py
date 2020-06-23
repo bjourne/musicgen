@@ -20,7 +20,7 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from collections import Counter, namedtuple
 from docopt import docopt
 from musicgen.corpus import load_index
-from musicgen.parser import PowerPackerModule, load_file
+from musicgen.parser import CompressedModule, load_file
 from musicgen.pcode import (is_pcode_learnable,
                             mod_to_pcode,
                             pcode_to_midi_file,
@@ -78,8 +78,8 @@ def mod_file_to_code_w_progress(i, n, file_path, info):
     SP.header('[ %4d / %4d ] PARSING %s' % (i, n, file_path))
     try:
         mod = load_file(file_path)
-    except PowerPackerModule:
-        SP.print('PowerPacker module.')
+    except CompressedModule:
+        SP.print('Compressed module.')
         return None
     code = list(info.to_code_fn(mod))
     if not info.is_learnable_fn(code):
@@ -301,7 +301,7 @@ def generate_music(temps, top_ps, data, path, weights_path,
     n_preds = n_temps + n_top_ps
 
     # Often more than one full song - not great.
-    n_samples = 400
+    n_samples = 1000
     n_seed = 128
 
     SP.header('%d PREDICTIONS' % n_preds)
@@ -435,8 +435,8 @@ def main():
                                     lr, seq_len)
     weights_path = path / weights_file
     if do_generate:
-        temps = [0.8, 1.0, 1.05, 1.15, 1.3]
-        top_ps = [0.7, 0.8, 0.9, 0.95, 0.99]
+        temps = [0.8, 1.0, 1.05, 1.15, 1.25]
+        top_ps = [0.75, 0.85, 0.9, 0.95, 0.99]
         generate_music(temps, top_ps,
                        test, path, weights_path,
                        emb_size,
