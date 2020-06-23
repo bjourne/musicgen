@@ -98,14 +98,23 @@ ModuleSTK = Struct(
     'integrity' / Check(0 <= this.n_orders <= 128)
     )
 
-class PowerPackerModule(ValueError):
+class CompressedModule(ValueError):
+    pass
+
+class PowerPackerModule(CompressedModule):
+    pass
+
+class XPKModule(CompressedModule):
     pass
 
 def load_file(fname):
     with open(fname, 'rb') as f:
         arr = bytearray(f.read())
-    if arr[:4].decode('utf-8', 'ignore') == 'PP20':
+    first4 = arr[:4].decode('utf-8', 'ignore')
+    if first4 == 'PP20':
         raise PowerPackerModule()
+    elif first4 == 'XPKF':
+        raise XPKModule()
     # The magic at offset 1080 determines type of module. If the magic
     # is not a printable ascii string, the module is a Sound Tracker
     # module containing only 15 samples. Otherwise, if the magic is
@@ -118,7 +127,9 @@ def load_file(fname):
         # Found in flight_of_grud.mod
         'FEST',
         # judgement_day_gvine.mod
-        'LARD'
+        'LARD',
+        # kingdomofpleasure.mod
+        'NSMS'
     ]
     if not magic.isprintable():
         return ModuleSTK.parse(arr)
