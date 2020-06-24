@@ -44,6 +44,8 @@ from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.optimizers import *
 from tensorflow.nn import softmax
 from time import time
+from tqdm import trange
+
 import numpy as np
 import tensorflow as tf
 
@@ -112,6 +114,75 @@ def build_cache(path, shuffle_file, mods, info):
     arrs = [e for (_, e) in sorted(tmp)]
 
     return encoder, arrs
+
+class ModelParams:
+    @classmethod
+    def from_docopt_args(cls, args):
+        code_type = args['<code-type>']
+        dropout = float(args['--dropout'])
+        rec_dropout = float(args['--rec-dropout'])
+        emb_size = int(args['--emb-size'])
+        batch_size = int(args['--batch-size'])
+        lstm1_units = int(args['--lstm1-units'])
+        lstm2_units = int(args['--lstm2-units'])
+        lr = float(args['--lr'])
+        seq_len = int(args['--seq-len'])
+        epochs = int(args['--epochs'])
+        return cls(code_type,
+                   dropout, rec_dropout,
+                   lstm1_units, lstm2_units,
+                   emb_size, batch_size,
+                   seq_len, epochs, lr)
+
+    def __init__(self, code_type,
+                 dropout, rec_dropout,
+                 lstm1_units, lstm2_units,
+                 emb_size, batch_size,
+                 seq_len, epochs, lr):
+        self.code_type = code_type
+        self.dropout = dropout
+        self.rec_dropout = rec_dropout
+        self.lstm1_units = lstm1_units
+        self.lstm2_units = lstm2_units
+        self.emb_size = emb_size
+        self.batch_size = batch_size
+        self.seq_len = seq_len
+        self.epochs = epochs
+        self.lr = lr
+
+    def weights_file(self):
+        args = (self.code_type, self.epochs,
+                self.emb_size, self.batch_size,
+                self.dropout, self.rec_dropout,
+                self.lstm1_units, self.lstm2_units,
+                self.lr, self.seq_len)
+        fmt = 'weights_%s-%03d-%03d-%03d-%.2f-%.2f-%03d-%03d-%.5f-%03d.h5'
+        return fmt % args
+
+    def model(self, vocab_size, batch_size, stateful):
+        inp = Input(
+            shape = (None,),
+            batch_size = batch_size,
+            dtype = tf.int32)
+        embedding = Embedding(
+            input_dim = vocab_size,
+            output_dim = self.emb_size)
+        lstm1 = LSTM(
+            self.lstm1_units,
+            stateful = stateful,
+            return_sequences = True,
+            dropout = self.dropout,
+            recurrent_dropout = self.rec_dropout)
+        lstm2 = LSTM(
+            self.lstm2_units,
+            stateful = stateful,
+            return_sequences = True,
+            dropout = self.dropout,
+            recurrent_dropout = self.rec_dropout)
+        time_dist = TimeDistributed(
+            Dense(vocab_size))
+        out = time_dist(lstm2(lstm1(embedding(inp))))
+        return MyModel(inputs = [inp], outputs = [out])
 
 class TrainingData:
     def __init__(self, code_type):
@@ -194,7 +265,6 @@ def compute_and_apply_gradients(model, x, y):
                                    regularization_losses = model.losses)
     vars = model.trainable_variables
     grads = tape.gradient(loss, vars)
-    #grads = [tf.clip_by_value(g, -1, 1) for g in grads]
     grads, _ = tf.clip_by_global_norm(grads, 15)
     model.optimizer.apply_gradients(zip(grads, vars))
     return y_hat
@@ -206,57 +276,17 @@ class MyModel(Model):
         self.compiled_metrics.update_state(y, y_hat)
         return {m.name: m.result() for m in self.metrics}
 
-def create_model(vocab_size, emb_size, batch_size,
-                 dropout, rec_dropout,
-                 lstm1_units, lstm2_units,
-                 stateful):
-    inp = Input(
-        shape = (None,),
-        batch_size = batch_size,
-        dtype = tf.int32)
-    embedding = Embedding(
-        input_dim = vocab_size,
-        output_dim = emb_size)
-    lstm1 = LSTM(
-        lstm1_units,
-        stateful = stateful,
-        return_sequences = True,
-        dropout = dropout,
-        recurrent_dropout = rec_dropout)
-    lstm2 = LSTM(
-        lstm2_units,
-        stateful = stateful,
-        return_sequences = True,
-        dropout = dropout,
-        recurrent_dropout = rec_dropout)
-    time_dist = TimeDistributed(
-        Dense(vocab_size))
-    out = time_dist(lstm2(lstm1(embedding(inp))))
-    return MyModel(inputs = [inp], outputs = [out])
-
-def get_weights_file(code_type, epochs,
-                     emb_size, batch_size,
-                     dropout, rec_dropout, lstm1_units, lstm2_units,
-                     lr, seq_len):
-    args = (code_type, epochs,
-            emb_size, batch_size,
-            dropout, rec_dropout, lstm1_units, lstm2_units,
-            lr, seq_len)
-    fmt = 'weights_%s-%03d-%03d-%03d-%.2f-%.2f-%03d-%03d-%.5f-%03d.h5'
-    return fmt % args
-
 def generate_sequences(model, temps, top_ps, seed, n_samples):
     # Prime the model
     for i in range(seed.shape[1] - 1):
         model.predict(seed[:, i:i + 1])
 
     preds = [seed[:, -1:]]
-    start = time()
     n_temps = len(temps)
     n_top_ps = len(top_ps)
 
     SP.print('Predicting %d tokens.' % n_samples)
-    for _ in range(n_samples):
+    for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
         last_word = preds[-1]
         Ps = model.predict(last_word)[:, 0, :]
         Ps = softmax(Ps).numpy()
@@ -284,32 +314,23 @@ def generate_sequences(model, temps, top_ps, seed, n_samples):
             ixs.append(np.random.choice(len(P), p = P))
 
         preds.append(np.array(ixs, dtype = np.int32))
-    elapsed = time() - start
-    SP.print('Predicted %d tokens in %.2fs.' % (n_samples, elapsed))
 
     SP.leave()
     return [[int(preds[j][i]) for j in range(n_samples)]
             for i in range(n_temps + n_top_ps)]
 
-def generate_music(temps, top_ps, data, path, weights_path,
-                   emb_size,
-                   dropout, rec_dropout,
-                   lstm1_units, lstm2_units):
-
+def generate_music(temps, top_ps, data, path, params):
     n_temps = len(temps)
     n_top_ps = len(top_ps)
     n_preds = n_temps + n_top_ps
 
     # Often more than one full song - not great.
-    n_samples = 1000
+    n_samples = 1200
     n_seed = 128
 
     SP.header('%d PREDICTIONS' % n_preds)
-    model = create_model(len(data.encoder.ix2ch), emb_size, n_preds,
-                         dropout, rec_dropout,
-                         lstm1_units, lstm2_units,
-                         True)
-    model.load_weights(str(weights_path))
+    model = params.model(len(data.encoder.ix2ch), n_preds, True)
+    model.load_weights(str(path / params.weights_file()))
     model.reset_states()
     seq = data.flatten()
     long_pause = data.info.long_pause
@@ -350,18 +371,12 @@ def generate_music(temps, top_ps, data, path, weights_path,
     data.code_to_midi_file(seqs[-1], file_path)
     SP.leave()
 
-def train_model(weights_path, epochs,
-                train, valid,
-                emb_size, batch_size,
-                dropout, rec_dropout,
-                lstm1_units, lstm2_units, lr, seq_len):
+def train_model(train, valid, path, params):
     strategy = select_strategy()
     with strategy.scope():
         vocab_size = len(train.encoder.ix2ch)
-        model = create_model(vocab_size, emb_size, None,
-                             dropout, rec_dropout,
-                             lstm1_units, lstm2_units, False)
-        optimizer = RMSprop(learning_rate = lr)
+        model = params.model(vocab_size, None, False)
+        optimizer = RMSprop(learning_rate = params.lr)
         loss_fn = SparseCategoricalCrossentropy(from_logits = True)
         model.compile(
             optimizer = optimizer,
@@ -369,6 +384,7 @@ def train_model(weights_path, epochs,
             metrics = ['sparse_categorical_accuracy'])
     model.summary()
 
+    weights_path = path / params.weights_file()
     if weights_path.exists():
         SP.print('Loading weights from %s...' % weights_path)
         model.load_weights(str(weights_path))
@@ -381,18 +397,18 @@ def train_model(weights_path, epochs,
         save_best_only = True,
         mode = 'min')
     reduce_lr = ReduceLROnPlateau(
-        factor = 0.2, patience = 8, min_lr = lr / 100)
+        factor = 0.2, patience = 8, min_lr = params.lr / 100)
     stopping = EarlyStopping(patience = 30)
     callbacks = [cb_best, reduce_lr, stopping]
     SP.print('Batching samples...')
-    train_ds = train.to_samples(seq_len) \
-        .batch(batch_size, drop_remainder = True)
-    valid_ds = valid.to_samples(seq_len) \
-        .batch(batch_size, drop_remainder = True)
+    train_ds = train.to_samples(params.seq_len) \
+        .batch(params.batch_size, drop_remainder = True)
+    valid_ds = valid.to_samples(params.seq_len) \
+        .batch(params.batch_size, drop_remainder = True)
 
     model.fit(x = train_ds,
               validation_data = valid_ds,
-              epochs = epochs, callbacks = callbacks,
+              epochs = params.epochs, callbacks = callbacks,
               verbose = 1)
 
 def main():
@@ -400,23 +416,14 @@ def main():
     args = docopt(__doc__, version = 'Train LSTM 1.0')
     SP.enabled = args['--verbose']
     path = Path(args['<corpus-path>'])
-    code_type = args['<code-type>']
     np.set_printoptions(linewidth = 160)
     do_generate = args['generate']
 
     # Hyperparameters
-    dropout = float(args['--dropout'])
-    rec_dropout = float(args['--rec-dropout'])
-    emb_size = int(args['--emb-size'])
-    batch_size = int(args['--batch-size'])
-    lstm1_units = int(args['--lstm1-units'])
-    lstm2_units = int(args['--lstm2-units'])
-    lr = float(args['--lr'])
-    seq_len = int(args['--seq-len'])
-    epochs = int(args['--epochs'])
+    params = ModelParams.from_docopt_args(args)
 
     # Load data and split it
-    data = TrainingData(code_type)
+    data = TrainingData(params.code_type)
     if path.is_dir():
         data.load_disk_cache(path, 150)
         train, valid, test = data.split_3way(0.8, 0.1)
@@ -428,26 +435,13 @@ def main():
     args = len(train.arrs), len(valid.arrs), len(test.arrs)
     SP.print('Train/valid/test split %d/%d/%d' % args)
 
-    weights_file = get_weights_file(code_type, epochs,
-                                    emb_size, batch_size,
-                                    dropout, rec_dropout,
-                                    lstm1_units, lstm2_units,
-                                    lr, seq_len)
-    weights_path = path / weights_file
+    weights_file = params.weights_file()
     if do_generate:
         temps = [0.8, 1.0, 1.05, 1.15, 1.25]
         top_ps = [0.75, 0.85, 0.9, 0.95, 0.99]
-        generate_music(temps, top_ps,
-                       test, path, weights_path,
-                       emb_size,
-                       dropout, rec_dropout,
-                       lstm1_units, lstm2_units)
+        generate_music(temps, top_ps, test, path, params)
     else:
-        train_model(weights_path, epochs,
-                    train, valid,
-                    emb_size, batch_size,
-                    dropout, rec_dropout,
-                    lstm1_units, lstm2_units, lr, seq_len)
+        train_model(train, valid, path, params)
 
 if __name__ == '__main__':
     main()
