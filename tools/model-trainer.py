@@ -19,11 +19,13 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from collections import Counter, namedtuple
 from docopt import docopt
+from musicgen.code_utils import CODE_MIDI_MAPPING
 from musicgen.corpus import load_index
+from musicgen.generation import notes_to_audio_file
 from musicgen.parser import CompressedModule, load_file
 from musicgen.pcode import (is_pcode_learnable,
                             mod_to_pcode,
-                            pcode_to_midi_file,
+                            pcode_to_notes,
                             pcode_short_pause,
                             pcode_long_pause)
 from musicgen.scode import (mod_file_to_scode,
@@ -49,18 +51,18 @@ from tqdm import trange
 import numpy as np
 import tensorflow as tf
 
-CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_midi_fn',
+CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_notes_fn',
                                    'short_pause', 'long_pause',
                                    'is_learnable_fn'])
-
+# TODO: Fix scode
 CODE_TYPES = {
     'pcode_abs' : CodeInfo(lambda m: mod_to_pcode(m, False),
-                           lambda c, fp: pcode_to_midi_file(c, fp, False),
+                           lambda c: pcode_to_notes(c, False),
                            pcode_short_pause(),
                            pcode_long_pause(),
                            is_pcode_learnable),
     'pcode_rel' : CodeInfo(lambda m: mod_to_pcode(m, True),
-                           lambda c, fp: pcode_to_midi_file(c, fp, True),
+                           lambda c: pcode_to_notes(c, False),
                            pcode_short_pause(),
                            pcode_long_pause(),
                            is_pcode_learnable),
@@ -243,7 +245,8 @@ class TrainingData:
 
     def code_to_midi_file(self, seq, file_path):
         code = self.encoder.decode_chars(seq)
-        self.info.to_midi_fn(code, file_path)
+        notes = self.info.to_notes_fn(code)
+        notes_to_audio_file(notes, file_path, CODE_MIDI_MAPPING, True)
 
     def flatten(self):
         pause = self.encoder.encode_chars(self.info.long_pause, False)
@@ -277,7 +280,7 @@ class MyModel(Model):
         return {m.name: m.result() for m in self.metrics}
 
 def generate_sequences(model, temps, top_ps, seed, n_samples):
-    # Prime the model
+    SP.print('Priming the model with %d tokens.' % len(seed))
     for i in range(seed.shape[1] - 1):
         model.predict(seed[:, i:i + 1])
 
@@ -326,7 +329,7 @@ def generate_music(temps, top_ps, data, path, params):
 
     # Often more than one full song - not great.
     n_samples = 1200
-    n_seed = 128
+    n_seed = 256
 
     SP.header('%d PREDICTIONS' % n_preds)
     model = params.model(len(data.encoder.ix2ch), n_preds, True)
@@ -353,21 +356,24 @@ def generate_music(temps, top_ps, data, path, params):
     seqs = np.array(seqs)
     seed = np.vstack((seed, seed[0]))
 
+    # Cut half the seed because it is too long to listen to it all.
+    seed = seed[:,n_seed // 2:]
+
     join = np.repeat(np.expand_dims(long_pause, 0), len(seqs), axis = 0)
     print(seed.shape, join.shape, seqs.shape)
     seqs = np.hstack((seed, join, seqs))
 
     for i in range(n_temps):
-        file_name = '%s-t-%.2f.mid' % (data.code_type, temps[i])
+        file_name = '%s-t-%.2f.mp3' % (data.code_type, temps[i])
         file_path = path / file_name
         data.code_to_midi_file(seqs[i], file_path)
 
     for i in range(n_top_ps):
-        file_name = '%s-p-%.2f.mid' % (data.code_type, top_ps[i])
+        file_name = '%s-p-%.2f.mp3' % (data.code_type, top_ps[i])
         file_path = path / file_name
         data.code_to_midi_file(seqs[n_temps + i], file_path)
 
-    file_path = path / ('%s-orig.mid' % data.code_type)
+    file_path = path / ('%s-orig.mp3' % data.code_type)
     data.code_to_midi_file(seqs[-1], file_path)
     SP.leave()
 

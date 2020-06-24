@@ -1,8 +1,7 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # PCode stands for parallel or polyphonic code.
-from musicgen.code_utils import (CODE_MIDI_MAPPING,
-                                 INSN_PITCH,
+from musicgen.code_utils import (INSN_PITCH,
                                  INSN_REL_PITCH,
                                  INSN_SILENCE,
                                  INSN_DRUM,
@@ -20,8 +19,7 @@ def pcode_short_pause():
 def pcode_long_pause():
     return [(INSN_SILENCE, 16)] * 4
 
-def pcode_to_midi_file(pcode, file_path, rel_pitches):
-    SP.header('WRITING %s' % file_path)
+def pcode_to_notes(pcode, rel_pitches):
     if rel_pitches:
         at_pitch = guess_initial_pitch(pcode)
 
@@ -63,8 +61,8 @@ def pcode_to_midi_file(pcode, file_path, rel_pitches):
     cols = sort_groupby(notes, lambda n: n.col_idx)
     for _, col in cols:
         fix_durations(list(col))
-    notes_to_midi_file(notes, file_path, CODE_MIDI_MAPPING)
     SP.leave()
+    return notes
 
 # Pretty weird code but it is isolated.
 def is_pcode_learnable(pcode):
@@ -75,7 +73,7 @@ def is_pcode_learnable(pcode):
 
     notes = [(c, a) for (c, a) in pcode if c != INSN_SILENCE]
     n_notes = len(notes)
-    if n_notes < 8:
+    if n_notes < 16:
         SP.print('To few notes, %d.' % n_notes)
         return False
     mel_notes_abs = [a for (c, a) in pcode if c == INSN_PITCH]
@@ -85,7 +83,7 @@ def is_pcode_learnable(pcode):
     mel_notes = mel_notes_rel if rel_pitches else mel_notes_abs
 
     n_unique_notes = len(set(mel_notes))
-    if n_unique_notes < 3:
+    if n_unique_notes < 4:
         SP.print('To few unique melodic notes, %d.' % n_unique_notes)
         return False
     at = 0
@@ -165,11 +163,13 @@ def mod_to_pcode(mod, rel_pitches):
 # Test encode and decode
 ########################################################################
 def test_encode_decode(mod_file, rel_pitches):
+    from musicgen.code_utils import CODE_MIDI_MAPPING
+    from musicgen.generation import notes_to_audio_file
+
     mod = load_file(mod_file)
     pcode = list(mod_to_pcode(mod, rel_pitches))
-    print(pcode)
-    print(is_pcode_learnable(pcode))
-    pcode_to_midi_file(pcode, 'test.mid', rel_pitches)
+    notes = pcode_to_notes(pcode, rel_pitches)
+    notes_to_audio_file(notes, 'test.wav', CODE_MIDI_MAPPING, True)
 
 if __name__ == '__main__':
     from sys import argv

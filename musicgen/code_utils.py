@@ -3,14 +3,18 @@
 # Utils common to all encodings.
 from musicgen.analyze import sample_props
 
-# Standard instructions
+# Fun melodic instruments:
+#   20 (organ)
+#   27 (jazz guitar)
+#  105 (sitar)
 CODE_MIDI_MAPPING = {
     1 : [-1, 40, 4, 1.0],
     2 : [-1, 36, 4, 1.0],
     3 : [-1, 31, 4, 1.0],
-    4 : [1, 48, 4, 1.0]
+    4 : [1, 54, 4, 1.0]
 }
 
+# Standard instructions
 INSN_PITCH = 'P'
 INSN_REL_PITCH = 'R'
 INSN_SILENCE = 'S'

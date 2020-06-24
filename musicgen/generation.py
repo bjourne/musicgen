@@ -5,6 +5,9 @@ from collections import namedtuple
 from itertools import groupby
 from mido import Message, MidiFile, MidiTrack
 from musicgen.utils import SP, flatten, sort_groupby
+from os import system
+from pathlib import Path
+from tempfile import mkdtemp
 
 Programs = namedtuple('Programs', ['melodic', 'percussive'])
 
@@ -117,9 +120,33 @@ def notes_to_midi_file(notes, midi_file, midi_mapping):
     # Group by column (9 for drums)
     note_groups = groupby(notes, lambda el: el[0])
 
+    tracks = [MidiTrack(list(midi_notes_to_track(channel, note_group)))
+              for (channel, note_group) in note_groups]
+
     midi = MidiFile(type = 1)
-    for i, (channel, note_group) in enumerate(note_groups):
-        track = list(midi_notes_to_track(channel, note_group))
-        track = MidiTrack(track)
-        midi.tracks.append(track)
+    midi.tracks = tracks
     midi.save(midi_file)
+
+def notes_to_audio_file(notes, audio_file, midi_mapping, stereo):
+    type = 'stereo' if stereo else 'mono'
+    SP.header('%d NOTES TO %s (%s)' % (len(notes), audio_file, type))
+
+    temp_dir = mkdtemp()
+    temp_dir = Path(temp_dir)
+
+    if stereo:
+        left_notes = [n for n in notes if n.col_idx in {0, 3}]
+        right_notes = [n for n in notes if n.col_idx in {1, 2}]
+        for notes, side in [(left_notes, 'L'), (right_notes, 'R')]:
+            mid = temp_dir / (side + '.mid')
+            notes_to_midi_file(notes, mid, midi_mapping)
+            system('timidity %s -OwM' % mid)
+        SP.print('Generating stereo output using sox.')
+        fmt = 'sox -M -c 1 %s -c 1 %s %s'
+        system(fmt % (temp_dir / 'L.wav', temp_dir / 'R.wav', audio_file))
+    else:
+        mid = temp_dir / 't.mid'
+        notes_to_midi_file(notes, mid, midi_mapping)
+        system('timidity %s -OwM' % mid)
+        system('sox %s %s' % (temp_dir / 't.wav', audio_file))
+    SP.leave()
