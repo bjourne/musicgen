@@ -32,7 +32,7 @@ from musicgen.scode import (mod_file_to_scode,
                             scode_to_midi_file,
                             scode_short_pause,
                             scode_long_pause)
-from musicgen.tf_utils import select_strategy, sequence_to_samples
+from musicgen.tensorflow import select_strategy, sequence_to_samples
 from musicgen.utils import (SP, CharEncoder,
                             file_name_for_params,
                             find_subseq, flatten, load_pickle_cache)
