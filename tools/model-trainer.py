@@ -181,8 +181,7 @@ class ModelParams:
             return_sequences = True,
             dropout = self.dropout,
             recurrent_dropout = self.rec_dropout)
-        time_dist = TimeDistributed(
-            Dense(vocab_size))
+        time_dist = TimeDistributed(Dense(vocab_size))
         out = time_dist(lstm2(lstm1(embedding(inp))))
         return MyModel(inputs = [inp], outputs = [out])
 
@@ -243,7 +242,7 @@ class TrainingData:
             td.encoder = self.encoder
         return tds
 
-    def code_to_midi_file(self, seq, file_path):
+    def code_to_audio_file(self, seq, file_path):
         code = self.encoder.decode_chars(seq)
         notes = self.info.to_notes_fn(code)
         notes_to_audio_file(notes, file_path, CODE_MIDI_MAPPING, True)
@@ -280,7 +279,7 @@ class MyModel(Model):
         return {m.name: m.result() for m in self.metrics}
 
 def generate_sequences(model, temps, top_ps, seed, n_samples):
-    SP.print('Priming the model with %d tokens.' % len(seed))
+    SP.print('Priming the model with %d tokens.' % seed.shape[1])
     for i in range(seed.shape[1] - 1):
         model.predict(seed[:, i:i + 1])
 
@@ -343,10 +342,16 @@ def generate_music(temps, top_ps, data, path, params):
     while True:
         idx = randrange(len(seq) - n_seed - n_samples)
         seed = seq[idx:idx + n_seed]
-        if not list(find_subseq(seed.tolist(), long_pause)):
-            break
-        SP.print('Long pause in seed, regenerating.')
-    SP.print('Seed %d+%d.' % (idx, n_seed))
+        seed_seq = seed.tolist()
+        n_unique = len(set(seed_seq))
+        if list(find_subseq(seed_seq, long_pause)):
+            SP.print('Long pause in seed, regenerating.')
+            continue
+        if n_unique < 5:
+            SP.print('To few different tokens, regenerating.')
+            continue
+        break
+    SP.print('Seed %d+%d (%d unique tokens).' % (idx, n_seed, n_unique))
 
     seed = np.repeat(np.expand_dims(seed, 0), n_preds, axis = 0)
     seqs = generate_sequences(model, temps, top_ps, seed, n_samples)
@@ -364,23 +369,24 @@ def generate_music(temps, top_ps, data, path, params):
     seqs = np.hstack((seed, join, seqs))
 
     for i in range(n_temps):
-        file_name = '%s-t-%.2f.mp3' % (data.code_type, temps[i])
+        file_name = '%s-t%.2f.mp3' % (data.code_type, temps[i])
         file_path = path / file_name
-        data.code_to_midi_file(seqs[i], file_path)
+        data.code_to_audio_file(seqs[i], file_path)
 
     for i in range(n_top_ps):
-        file_name = '%s-p-%.2f.mp3' % (data.code_type, top_ps[i])
+        file_name = '%s-p%.2f.mp3' % (data.code_type, top_ps[i])
         file_path = path / file_name
-        data.code_to_midi_file(seqs[n_temps + i], file_path)
+        data.code_to_audio_file(seqs[n_temps + i], file_path)
 
     file_path = path / ('%s-orig.mp3' % data.code_type)
-    data.code_to_midi_file(seqs[-1], file_path)
+    data.code_to_audio_file(seqs[-1], file_path)
     SP.leave()
 
 def train_model(train, valid, path, params):
+    vocab_size = len(train.encoder.ix2ch)
     strategy = select_strategy()
     with strategy.scope():
-        vocab_size = len(train.encoder.ix2ch)
+
         model = params.model(vocab_size, None, False)
         optimizer = RMSprop(learning_rate = params.lr)
         loss_fn = SparseCategoricalCrossentropy(from_logits = True)
@@ -443,9 +449,9 @@ def main():
 
     weights_file = params.weights_file()
     if do_generate:
-        temps = [0.8, 1.0, 1.05, 1.15, 1.25]
-        top_ps = [0.75, 0.85, 0.9, 0.95, 0.99]
-        generate_music(temps, top_ps, test, path, params)
+        temps = [0.8, 0.9, 1.0, 1.05, 1.15]
+        top_ps = [0.75, 0.85, 0.9, 0.94, 0.98]
+        generate_music(temps, top_ps, valid, path, params)
     else:
         train_model(train, valid, path, params)
 
