@@ -85,7 +85,12 @@ Module = Struct(
     'initials' / Bytes(4),
     'patterns' / Array(max_(this.pattern_table) + 1, Pattern),
     'samples' / Array(31, SampleData),
-    'integrity' / Check(0 <= this.n_orders <= 128))
+    'integrity' / Check(0 <= this.n_orders <= 128)
+)
+
+def pattern_count_stk(this):
+    '''This is correct unless the MOD uses hidden patterns.'''
+    return max(this.pattern_table[:this.n_orders]) + 1
 
 ModuleSTK = Struct(
     'title' / MyPaddedString(20, 'utf-8', 'replace'),
@@ -93,35 +98,39 @@ ModuleSTK = Struct(
     'n_orders' / Byte,
     'restart_pos' / Byte,
     'pattern_table' / Array(128, Byte),
-    'patterns' / Array(max_(this.pattern_table) + 1, Pattern),
+    'patterns' / Array(pattern_count_stk, Pattern),
     'samples' / Array(15, SampleData),
     'integrity' / Check(0 <= this.n_orders <= 128)
-    )
+)
 
-class CompressedModule(ValueError):
+class UnsupportedModule(ValueError):
     pass
 
-class PowerPackerModule(CompressedModule):
+class PowerPackerModule(UnsupportedModule):
     pass
 
-class XPKModule(CompressedModule):
+class XPKModule(UnsupportedModule):
+    pass
+
+class IceTrackerModule(UnsupportedModule):
     pass
 
 def load_file(fname):
     with open(fname, 'rb') as f:
         arr = bytearray(f.read())
+
+    # Read the four byte file signature. If it is PP20 or XPKF, the
+    # MOD is compressed and we throw a suitable exception.
     first4 = arr[:4].decode('utf-8', 'ignore')
     if first4 == 'PP20':
         raise PowerPackerModule()
     elif first4 == 'XPKF':
         raise XPKModule()
-    # The magic at offset 1080 determines type of module. If the magic
-    # is not a printable ascii string, the module is a Sound Tracker
-    # module containing only 15 samples. Otherwise, if the magic is
-    # the string "M.K." it is a ProTracker module containing 31
-    # samples.
-    magic = arr[1080:1084].decode('utf-8', 'ignore')
-    signatures_4chan = [
+
+    # The magic string at offset 1080 determines type of module. If it
+    # one of the listed signatures it is a standard ProTracker
+    # compatible module with 31 samples.
+    signatures_4chan = {
         # Standard ones
         '4CHN', 'M.K.', 'FLT4', 'M!K!', 'M&K!',
         # Found in flight_of_grud.mod
@@ -130,11 +139,25 @@ def load_file(fname):
         'LARD',
         # kingdomofpleasure.mod
         'NSMS'
-    ]
+    }
+    magic = arr[1080:1084].decode('utf-8', 'ignore')
+    if magic in signatures_4chan:
+        return Module.parse(arr)
+
+    # If the second magic string at offset 1464 is MTN\0 or IT10 it is
+    # a SoundTracker 2.6 or Ice Tracker module which is incompatible
+    # with ProTracker. Handling the format is not too hard but since
+    # it is very uncommon it is not worth the bother.
+    magic2 = arr[1464:1468].decode('utf-8', 'ignore')
+    if magic2 in {'MTN\0', 'IT10'}:
+        raise IceTrackerModule()
+
+    # Otherwise if the magic is not printable we assume that it is a
+    # 15 sample original Sound Tracker module.
     if not magic.isprintable():
         return ModuleSTK.parse(arr)
-    elif magic in signatures_4chan:
-        return Module.parse(arr)
+
+    # Unknown module type. Bail out.
     raise ValueError(f'Unknown magic "{magic}"!')
 
 def save_file(fname, mod):
