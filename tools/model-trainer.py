@@ -22,7 +22,7 @@ from docopt import docopt
 from musicgen.code_utils import CODE_MIDI_MAPPING
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_audio_file
-from musicgen.parser import CompressedModule, load_file
+from musicgen.parser import UnsupportedModule, load_file
 from musicgen.pcode import (is_pcode_learnable,
                             mod_to_pcode,
                             pcode_to_notes,
@@ -82,8 +82,9 @@ def mod_file_to_code_w_progress(i, n, file_path, info):
     SP.header('[ %4d / %4d ] PARSING %s' % (i, n, file_path))
     try:
         mod = load_file(file_path)
-    except CompressedModule:
-        SP.print('Compressed module.')
+    except UnsupportedModule:
+        SP.print('Unsupported module format.')
+        SP.leave()
         return None
     code = list(info.to_code_fn(mod))
     if not info.is_learnable_fn(code):
