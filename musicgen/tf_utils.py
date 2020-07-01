@@ -3,7 +3,8 @@ from musicgen.utils import SP
 from os import environ
 from tensorflow.data import Dataset
 from tensorflow.config import (experimental_connect_to_cluster,
-                               list_logical_devices)
+                               list_logical_devices,
+                               list_physical_devices)
 from tensorflow.distribute import OneDeviceStrategy
 from tensorflow.distribute.cluster_resolver import TPUClusterResolver
 from tensorflow.distribute.experimental import TPUStrategy
@@ -14,19 +15,26 @@ import tensorflow as tf
 
 def select_strategy():
     SP.header('SELECTING STRATEGY')
+    gpus = list_physical_devices('GPU')
+    SP.header('%d GPU(s)' % len(gpus))
+    for gpu in gpus:
+        SP.print(gpu)
+    SP.leave()
     tpu_addr = environ.get('COLAB_TPU_ADDR')
     if not tpu_addr:
-        SP.print('TPU not found, using CPU.')
+        dev = '/GPU:0' if gpus else '/CPU:0'
+        SP.print('No TPU, using %s instead.' % dev)
         SP.leave()
-        return OneDeviceStrategy(device = "/cpu:0")
+        return OneDeviceStrategy(device = dev)
     SP.print('TPU address: %s' % tpu_addr)
     resolver = TPUClusterResolver('grpc://' + tpu_addr)
     experimental_connect_to_cluster(resolver)
     initialize_tpu_system(resolver)
-    devs = list_logical_devices('TPU')
-    assert len(devs) > 0
-    for dev in devs:
-        SP.print(dev)
+    tpus = list_logical_devices('TPU')
+    SP.header('%d TPU(s)' % len(tpus))
+    for tpu in tpus:
+        SP.print(tpu)
+    SP.leave()
     strategy = TPUStrategy(resolver)
     SP.print('%d synced replicas.' % strategy.num_replicas_in_sync)
     SP.leave()
