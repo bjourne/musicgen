@@ -131,6 +131,11 @@ def notes_to_audio_file(notes, audio_file, midi_mapping, stereo):
     type = 'stereo' if stereo else 'mono'
     SP.header('%d NOTES TO %s (%s)' % (len(notes), audio_file, type))
 
+    if audio_file.suffix == '.mid':
+        notes_to_midi_file(notes, audio_file, midi_mapping)
+        SP.leave()
+        return
+
     temp_dir = mkdtemp()
     temp_dir = Path(temp_dir)
 
