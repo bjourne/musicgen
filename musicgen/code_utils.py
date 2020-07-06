@@ -8,10 +8,10 @@ from musicgen.analyze import sample_props
 #   27 (jazz guitar)
 #  105 (sitar)
 CODE_MIDI_MAPPING = {
-    1 : [-1, 40, 4, 1.0],
+    1 : [-1, 44, 4, 1.0],
     2 : [-1, 36, 4, 1.0],
     3 : [-1, 31, 4, 1.0],
-    4 : [1, 54, 4, 1.0]
+    4 : [3, 48, 2, 1.0]
 }
 
 # Standard instructions
@@ -20,12 +20,13 @@ INSN_REL_PITCH = 'R'
 INSN_SILENCE = 'S'
 INSN_DRUM = 'D'
 
+def insn_to_string(insn):
+    cmd, arg = insn
+    if cmd == INSN_PITCH:
+        return '%02d' % arg
+    return '%s%s' % (cmd, arg)
+
 def code_to_string(pcode):
-    def insn_to_string(insn):
-        cmd, arg = insn
-        if cmd == INSN_PITCH:
-            return '%02d' % arg
-        return '%s%s' % (cmd, arg)
     return ' '.join(insn_to_string(insn) for insn in pcode)
 
 def guess_percussive_instruments(mod, notes):
