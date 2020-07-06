@@ -8,8 +8,6 @@ from musicgen.code_utils import (INSN_PITCH,
                                  fix_durations,
                                  guess_initial_pitch,
                                  guess_percussive_instruments)
-from musicgen.generation import notes_to_midi_file
-from musicgen.parser import load_file
 from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
 from musicgen.utils import SP, sort_groupby
 
@@ -164,12 +162,13 @@ def mod_to_pcode(mod, rel_pitches):
 ########################################################################
 def test_encode_decode(mod_file, rel_pitches):
     from musicgen.code_utils import CODE_MIDI_MAPPING
-    from musicgen.generation import notes_to_audio_file
-
+    from musicgen.generation import (notes_to_audio_file,
+                                     notes_to_midi_file)
+    from musicgen.parser import load_file
     mod = load_file(mod_file)
     pcode = list(mod_to_pcode(mod, rel_pitches))
     notes = pcode_to_notes(pcode, rel_pitches)
-    notes_to_audio_file(notes, 'test.wav', CODE_MIDI_MAPPING, True)
+    notes_to_midi_file(notes, 'test.mid', CODE_MIDI_MAPPING)
 
 if __name__ == '__main__':
     from sys import argv
