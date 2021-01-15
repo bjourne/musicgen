@@ -2,7 +2,7 @@
 """MOD sample extractor
 
 Usage:
-    extract-samples.py [-v] <corpus/module>
+    extract-samples.py [-vh] <corpus/module>
 
 Options:
     -h --help              show this screen
