@@ -50,7 +50,7 @@ def top_p_skew(P, top_p):
 def lstm_continuation(model, temps, top_ps, seed, n_samples):
     SP.print('Priming the model with %d tokens.' % seed.shape[1])
     for i in trange(seed.shape[1] - 1):
-        model.predict(seed[:, i:i + 1])
+        model.predict(seed[:, i])
 
     preds = np.expand_dims(seed[:, -1], 0)
     n_temps = len(temps)
@@ -61,8 +61,8 @@ def lstm_continuation(model, temps, top_ps, seed, n_samples):
     SP.print('Predicting %d tokens.' % n_samples)
     for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
         last_word = preds[-1]
-        Ps = model.predict(last_word)[:, 0, :]
-        Ps = softmax(Ps).numpy()
+        logits = model.predict(last_word)[:, 0, :]
+        Ps = softmax(logits).numpy()
 
         for i in range(n_temps):
             Ps[i] = temperature_skew(Ps[i], temps[i])
@@ -71,11 +71,13 @@ def lstm_continuation(model, temps, top_ps, seed, n_samples):
             Ps[i + n_temps] = top_p_skew(Ps[i + n_temps], top_ps[i])
 
         ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
+        for i, ix in enumerate(ixs):
+            log_probs[i] += np.log(Ps[i, ix])
         preds = np.vstack((preds, ixs))
 
     SP.leave()
     # Skip the first element which is not actually a prediction.
-    return preds.T[:,1:]
+    return preds.T[:,1:], log_probs
 
 def transformer_continuation(model, temps, top_ps, seed, n_samples):
     seed = np.array(seed, dtype = np.int32)
@@ -158,7 +160,7 @@ def main():
         cont_fn = transformer_continuation
     else:
         cont_fn = lstm_continuation
-    seqs = cont_fn(model, temps, top_ps, seed, n_samples)
+    seqs, log_probs = cont_fn(model, temps, top_ps, seed, n_samples)
 
     # Add the original
     orig = seq[seed_idx + n_seed:seed_idx + n_seed + n_samples]
@@ -174,11 +176,16 @@ def main():
     prefix = '%s-%09d' % (data.code_type, seed_idx)
     file_names = ['%s-t%.3f' % (prefix, t) for t in temps]
     file_names += ['%s-p%.3f' % (prefix, p) for p in top_ps]
-    file_names.append('%s-orig' % prefix)
 
-    file_names = ['%s.%s' % (f, file_format) for f in file_names]
-    for file_name, seq in zip(file_names, seqs):
-        data.save_code(seq, path / file_name)
+    # Add orig
+    file_names.append('%s-orig' % prefix)
+    log_probs.append(0)
+
+    #file_names = ['%s.%s' % (f, file_format) for f in file_names]
+    for file_name, seq, log_prob in zip(file_names, seqs, log_probs):
+        file_name = '%s-%04d.%s' % (file_name, -log_prob, file_format)
+        file_path = path / file_name
+        data.save_code(seq, file_path)
 
 if __name__ == '__main__':
     main()
