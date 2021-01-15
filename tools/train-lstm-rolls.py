@@ -22,13 +22,12 @@ from keras.utils import Sequence, to_categorical
 from mido import Message, MidiFile, MidiTrack
 from musicgen.analyze import sample_props
 from musicgen.corpus import load_index
-from musicgen.defs import period_to_idx
 from musicgen.parser import PowerPackerModule, load_file
 from musicgen.rows import linearize_rows, rows_to_mod_notes
 from musicgen.utils import (SP, file_name_for_params,
                             flatten, load_pickle, save_pickle)
 from pathlib import Path
-from random import randrange
+from random import randrange, shuffle
 import numpy as np
 
 np.set_printoptions(edgeitems = 20, linewidth = 180)
@@ -130,7 +129,8 @@ def make_model2(seq_len, n_chars):
     model = Model(input_midi, x)
     optimizer = SGD(lr=0.007)
     model.compile(loss = 'categorical_crossentropy',
-                  optimizer = optimizer)
+                  optimizer = optimizer,
+                  metrics = ['accuracy'])
     return model
 
 def notes_to_matrix(notes, sample_props, n_rows):
@@ -176,12 +176,17 @@ def notes_to_matrix(notes, sample_props, n_rows):
         for fol in range(dur - 1):
             M[row + fol + 1][col] = 0.5
 
+    # Clip silence.
     last_nonzero_row = np.nonzero(M)[0][-1]
     return M[:last_nonzero_row + 1]
 
 def mod_file_to_piano_roll(file_path):
     SP.header('PARSING %s' % str(file_path))
-    mod = load_file(file_path)
+    try:
+        mod = load_file(file_path)
+    except PowerPackerModule:
+        SP.print('PowerPacker module.')
+        return None
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = rows_to_mod_notes(rows, volumes)
@@ -257,6 +262,7 @@ def load_data_from_disk(corpus_path, mods, win_size):
     rolls = [mod_file_to_piano_roll(file_path)
              for file_path in file_paths]
     rolls = [roll for roll in rolls if roll is not None]
+    shuffle(rolls)
 
     padding = np.zeros((win_size, VOCAB_SIZE))
     rolls = [np.vstack((roll, padding)) for roll in rolls]
@@ -269,7 +275,7 @@ def load_data(corpus_path, kb_limit, win_size):
     mods = [mod for mod in index.values()
             if (mod.n_channels == 4
                 and mod.format == 'MOD'
-                and mod.kb_size <= kb_limit)][:100]
+                and mod.kb_size <= kb_limit)]
 
     size_sum = sum(mod.kb_size for mod in mods)
     params = (size_sum, kb_limit, win_size)
@@ -298,11 +304,11 @@ def main():
     train = dataset[:n_train]
     validate = dataset[n_train:n_train + n_validate]
 
-    batch_size = 128
+    batch_size = 256
     train_gen = WindowGenerator(train, batch_size, win_size)
     validate_gen = WindowGenerator(validate, batch_size, win_size)
 
-    model = make_model2(win_size, VOCAB_SIZE)
+    model = make_model(win_size, VOCAB_SIZE)
     model.fit(x = train_gen,
              steps_per_epoch = n_train // batch_size,
              validation_data = validate_gen,
