@@ -15,7 +15,7 @@ def pcode_short_pause():
     return [(INSN_SILENCE, 16)] * 2
 
 def pcode_long_pause():
-    return [(INSN_SILENCE, 16)] * 4
+    return [(INSN_SILENCE, 16)] * 8
 
 def pcode_to_notes(pcode, rel_pitches):
     if rel_pitches:
@@ -61,6 +61,32 @@ def pcode_to_notes(pcode, rel_pitches):
         fix_durations(list(col))
     SP.leave()
     return notes
+
+def metadata(pcode):
+    meta = {}
+    meta['n_toks'] = len(pcode)
+
+    notes = [(c, a) for (c, a) in pcode if c != INSN_SILENCE]
+    meta['n_notes'] = len(notes)
+
+    mel_notes_abs = [a for (c, a) in pcode if c == INSN_PITCH]
+    mel_notes_rel = [a for (c, a) in pcode if c == INSN_REL_PITCH]
+    rel_pitches = True if mel_notes_rel else False
+    mel_notes = mel_notes_rel if rel_pitches else mel_notes_abs
+
+    meta['n_unique_notes'] = len(set(mel_notes))
+
+    at = 0
+    lo, hi = 0, 0
+    for mel_note in mel_notes:
+        if rel_pitches:
+            at += mel_note
+        else:
+            at = mel_note
+        lo = min(at, lo)
+        hi = max(at, hi)
+    meta['pitch_range'] = hi - lo
+    return meta
 
 # Pretty weird code but it is isolated.
 def is_pcode_learnable(pcode):
