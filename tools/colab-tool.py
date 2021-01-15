@@ -39,7 +39,7 @@ def get_data(connection, sftp):
     SP.leave()
 
 def upload_files(connection, files):
-    SP.header('UPLOADING %d FILES' % len(files))
+    SP.header('UPLOADING %d FILE(S)' % len(files))
     for src, dst in sorted(files):
         SP.print('%-30s => %s' % (src, dst))
         connection.put(str(src), str(dst))
