@@ -1,7 +1,9 @@
-from collections import namedtuple
-from musicgen.code_utils import CODE_MIDI_MAPPING
+from collections import Counter, namedtuple
+from musicgen.code_utils import (CODE_MIDI_MAPPING, INSN_PITCH)
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_audio_file
+from musicgen.parser import UnsupportedModule, load_file
+from musicgen import pcode
 from musicgen.pcode import (mod_to_pcode,
                             pcode_long_pause,
                             pcode_short_pause,
@@ -11,14 +13,14 @@ from musicgen.scode import (mod_file_to_scode,
                             scode_to_midi_file,
                             scode_short_pause,
                             scode_long_pause)
-from musicgen.tensorflow import sequence_to_samples
 from musicgen.utils import (SP, CharEncoder, file_name_for_params,
                             load_pickle_cache, save_pickle)
+from random import shuffle
 import numpy as np
 
 CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_notes_fn',
                                    'short_pause', 'long_pause',
-                                   'is_learnable_fn'])
+                                   'metadata_fn'])
 
 # TODO: Fix scode
 CODE_TYPES = {
@@ -26,7 +28,7 @@ CODE_TYPES = {
                            lambda c: pcode_to_notes(c, False),
                            pcode_short_pause(),
                            pcode_long_pause(),
-                           is_pcode_learnable),
+                           pcode.metadata),
     'pcode_rel' : CodeInfo(lambda m: mod_to_pcode(m, True),
                            lambda c: pcode_to_notes(c, True),
                            pcode_short_pause(),
@@ -44,6 +46,25 @@ CODE_TYPES = {
                            None)
 }
 
+def is_learnable(meta):
+    n_toks = meta['n_toks']
+    pitch_range = meta['pitch_range']
+    n_notes = meta['n_notes']
+    n_unique_notes = meta['n_unique_notes']
+    if n_toks < 64:
+        SP.print('To few tokens, %d.' % n_toks)
+        return False
+    if n_notes < 16:
+        SP.print('To few notes, %d.' % n_notes)
+        return False
+    if n_unique_notes < 4:
+        SP.print('To few unique melodic notes, %d.' % n_unique_notes)
+        return False
+    if pitch_range >= 36:
+        SP.print('Pitch range %d too large.' % pitch_range)
+        return False
+    return True
+
 def mod_file_to_code_w_progress(i, n, file_path, info):
     SP.header('[ %4d / %4d ] PARSING %s' % (i, n, file_path))
     try:
@@ -53,10 +74,14 @@ def mod_file_to_code_w_progress(i, n, file_path, info):
         SP.leave()
         return None
     code = list(info.to_code_fn(mod))
-    if not info.is_learnable_fn(code):
-        code = None
+    meta = info.metadata_fn(code)
+    if not is_learnable(meta):
+        SP.leave()
+        return None
+
+    codes = [code]
     SP.leave()
-    return code
+    return codes
 
 def build_cache(path, shuffle_file, mods, info):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
@@ -73,10 +98,11 @@ def build_cache(path, shuffle_file, mods, info):
     encoder = CharEncoder()
     arrs = []
     for i, p, in enumerate(sorted(mod_files)):
-        code = mod_file_to_code_w_progress(i + 1, n, p, info)
-        if not code:
+        codes = mod_file_to_code_w_progress(i + 1, n, p, info)
+        if not codes:
             continue
-        arrs.append((p.name, encoder.encode_chars(code, True)))
+        codes = [encoder.encode_chars(c, True) for c in codes]
+        arrs.append((p.name, codes))
 
     # Shuffle according to indices.
     tmp = [(i, e) for (i, e) in zip(indices, arrs)]
@@ -114,10 +140,10 @@ class TrainingData:
         self.encoder = CharEncoder()
         self.arrs = [(p.name, self.encoder.encode_chars(code, True))]
 
-    def print_historgram(self):
-        codes = [arr for (name, arr) in self.arrs]
-        seq = np.concatenate(codes)
-        ix_counts = Counter(seq)
+    def print_histogram(self):
+        seq = self.flatten(False)
+        unique, counts = np.unique(seq, return_counts = True)
+        ix_counts = dict(zip(unique, counts))
         ch_counts = {self.encoder.decode_char(ix) : cnt
                      for (ix, cnt) in ix_counts.items()}
         total = sum(ch_counts.values())
@@ -149,23 +175,30 @@ class TrainingData:
             notes = self.info.to_notes_fn(code)
             notes_to_audio_file(notes, file_path, CODE_MIDI_MAPPING, True)
 
-    def flatten(self):
+    def flatten(self, add_pause):
         pause = self.encoder.encode_chars(self.info.long_pause, False)
         padded = []
         for name, arr in self.arrs:
-            if len(arr) > 0:
-                padded.append(arr)
-                padded.append(pause)
-        return np.concatenate(padded)
+            assert len(arr) > 0
+            for arr2 in arr:
+                padded.append(arr2)
+                if add_pause:
+                    padded.append(pause)
+        s = np.concatenate(padded)
+        return s
 
     def to_samples(self, length):
-        seq = self.flatten()
+        from musicgen.tensorflow import sequence_to_samples
+        seq = self.flatten(True)
         return sequence_to_samples(seq, length)
 
 def load_training_data(code_type, path):
     td = TrainingData(code_type)
     if path.is_dir():
         td.load_disk_cache(path, 150)
-        return td.split_3way(0.8, 0.1)
-    td.load_mod_file(path)
-    return td, td, td
+        train, valid, test = td.split_3way(0.8, 0.1)
+    else:
+        td.load_mod_file(path)
+        train = valid = test = td
+    td.print_histogram()
+    return train, valid, test

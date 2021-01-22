@@ -272,12 +272,13 @@ class ModelParams:
                 self.type_params.as_file_name_part())
         return fmt % args
 
-    def model(self, vocab_size, batch_size, stateful):
-        if self.model_type == 'transformer':
-            return transformer_model(vocab_size, 128, 2048, 0.2, 8, 16)
-        return lstm_model(vocab_size,
-                          self.type_params.emb_size,
-                          self.type_params.lstm1_units,
-                          self.type_params.lstm2_units,
-                          self.dropout, self.type_params.rec_dropout,
-                          stateful, batch_size)
+
+def model_from_params(model, vocab_size, batch_size, stateful):
+    if model.model_type == 'transformer':
+        return transformer_model(vocab_size, 128, 2048, 0.2, 8, 16)
+    return lstm_model(vocab_size,
+                      model.type_params.emb_size,
+                      model.type_params.lstm1_units,
+                      model.type_params.lstm2_units,
+                      model.dropout, model.type_params.rec_dropout,
+                      stateful, batch_size)
