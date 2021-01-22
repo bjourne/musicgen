@@ -24,12 +24,11 @@ Options:
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from docopt import docopt
-from musicgen.utils import SP, find_subseq
+from musicgen.params import ModelParams
 from musicgen.training_data import load_training_data
-from musicgen.tensorflow import ModelParams, select_strategy
+from musicgen.utils import SP, find_subseq
 from pathlib import Path
 from random import randrange
-from tensorflow.nn import softmax
 from tqdm import trange
 
 import numpy as np
@@ -48,6 +47,7 @@ def top_p_skew(P, top_p):
     return P / P.sum()
 
 def lstm_continuation(model, temps, top_ps, seed, n_samples):
+    from tensorflow.nn import softmax
     SP.print('Priming the model with %d tokens.' % seed.shape[1])
     for i in trange(seed.shape[1] - 1):
         model.predict(seed[:, i])
@@ -80,6 +80,7 @@ def lstm_continuation(model, temps, top_ps, seed, n_samples):
     return preds.T[:,1:], log_probs
 
 def transformer_continuation(model, temps, top_ps, seed, n_samples):
+    from tensorflow.nn import softmax
     seed = np.array(seed, dtype = np.int32)
     n_temps = len(temps)
     n_top_ps = len(top_ps)
@@ -126,7 +127,6 @@ def main():
     file_format = args['--file-format']
 
     SP.header('%d PREDICTIONS' % n_preds)
-    #with select_strategy().scope():
     model = params.model(vocab_size, n_preds, True)
     weights_path = path / params.weights_file()
     SP.print('Loading weights from %s.' % weights_path)
