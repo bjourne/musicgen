@@ -25,7 +25,7 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
 from musicgen.params import ModelParams
-from musicgen.tensorflow import select_strategy
+from musicgen.tensorflow import model_from_params, select_strategy
 from musicgen.training_data import load_training_data
 from musicgen.utils import SP
 from pathlib import Path
@@ -52,7 +52,7 @@ def main():
 
     vocab_size = len(train.encoder.ix2ch)
     with select_strategy().scope():
-        model = params.model(vocab_size, None, False)
+        model = model_from_params(params, vocab_size, None, False)
         optimizer = RMSprop(learning_rate = params.lr)
         loss_fn = SparseCategoricalCrossentropy(from_logits = True)
         model.compile(
