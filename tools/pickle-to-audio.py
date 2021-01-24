@@ -22,7 +22,9 @@ def main():
     # Prologue
     args = docopt(__doc__, version = 'Pickle to audio 1.0')
     SP.enabled = args['--verbose']
-    file_paths = [Path(f) for f in args['<files>']]
+    files = args['<files>']
+    print('FILES', files)
+    file_paths = [Path(f) for f in files]
 
     for file_path in file_paths:
         code_type = file_path.name.split('-')[0]

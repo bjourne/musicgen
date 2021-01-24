@@ -106,6 +106,7 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples):
             for i in range(n_temps + n_top_ps)]
 
 def main():
+    from musicgen.tensorflow import model_from_params
     # Prologue
     args = docopt(__doc__, version = 'Train MOD model 1.0')
     SP.enabled = args['--verbose']
@@ -127,7 +128,7 @@ def main():
     file_format = args['--file-format']
 
     SP.header('%d PREDICTIONS' % n_preds)
-    model = params.model(vocab_size, n_preds, True)
+    model = model_from_params(params, vocab_size, n_preds, True)
     weights_path = path / params.weights_file()
     SP.print('Loading weights from %s.' % weights_path)
     model.load_weights(str(weights_path))
