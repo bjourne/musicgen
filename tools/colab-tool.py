@@ -5,27 +5,26 @@
 """Colab Tool
 
 Usage:
-    colab-tool.py [-v] --authority=<s> --root-path=<s> get-data
-    colab-tool.py [-v] --authority=<s> --root-path=<s>
-        upload-code
-    colab-tool.py [-v] --authority=<s> --root-path=<s>
-        upload-caches <corpus-path>
-    colab-tool.py [-v] --authority=<s> --root-path=<s>
-        upload-file <local-file>
-    colab-tool.py [-v] --authority=<s> --root-path=<s>
-        run-file -- <file> <args>...
-    colab-tool.py [-v] --authority=<s> --root-path=<s>
-        upload-and-run-file [--drop-path] -- <file> <args>...
+    colab-tool.py [-v] get-data
+    colab-tool.py [-v] upload-code
+    colab-tool.py [-v] upload-caches <corpus-path>
+    colab-tool.py [-v] upload-file <local-file>
+    colab-tool.py [-v] run-file -- <file> <args>...
+    colab-tool.py [-v] upload-and-run-file [--drop-path] -- <file> <args>...
 
 Options:
     -h --help                   show this screen
     -v --verbose                print more output
     --authority=<s>             user:pwd@host:port
     --root-path=<s>             path to code and data on colab
+
+If authority or root path is not supplied, the values are taken for
+the environment variables MUSICGEN_AUTHORITY and MUSICGEN_ROOT_PATH.
 """
 from docopt import docopt
 from fabric import Connection
 from musicgen.utils import SP, flatten
+from os import environ
 from pathlib import Path
 
 def get_data(connection, sftp):
@@ -79,8 +78,15 @@ def run_python_file(connection, root_path, file_name, args):
 def main():
     args = docopt(__doc__, version = 'Colab Tool 1.0')
     SP.enabled = args['--verbose']
-    root_path = Path(args['--root-path'])
-    auth = args['--authority']
+
+    root_path = args.get('--root-path')
+    if not root_path:
+        root_path = environ['MUSICGEN_ROOT_PATH']
+    root_path = Path(root_path)
+
+    auth = args.get('--authority')
+    if not auth:
+        auth = environ['MUSICGEN_AUTHORITY']
     userinfo, netloc = auth.split('@')
     _, password = userinfo.split(':')
     host, port = netloc.split(':')
@@ -89,6 +95,7 @@ def main():
     connect_kwargs = {'password' : password}
     conn = Connection(host, 'root', port, connect_kwargs = connect_kwargs)
     sftp = conn.sftp()
+    SP.print('Changing to dir "%s".' % root_path)
     remote_mkdir_safe(sftp, root_path)
     sftp.chdir(str(root_path))
     if args['get-data']:
