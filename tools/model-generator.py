@@ -1,4 +1,4 @@
-# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+# Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
 """
 Music generation
 ================
@@ -25,6 +25,8 @@ from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from docopt import docopt
 from musicgen.params import ModelParams
+from musicgen.tensorflow import (compiled_model_from_params,
+                                 select_strategy)
 from musicgen.training_data import load_training_data
 from musicgen.utils import SP, find_subseq
 from pathlib import Path
@@ -84,11 +86,13 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples):
     seed = np.array(seed, dtype = np.int32)
     n_temps = len(temps)
     n_top_ps = len(top_ps)
+    n_preds = n_temps + n_top_ps
+    log_probs = [0] * n_preds
     preds = []
 
     SP.print('Predicting %d tokens.' % n_samples)
     for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
-        y = model.predict(seed)
+        y = model(seed)
         Ps = y[:, -1, :]
         Ps = softmax(Ps).numpy()
 
@@ -99,14 +103,14 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples):
         ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
         preds.append(ixs)
 
-        seed = np.hstack((seed, np.expand_dims(ixs, 1)))
+        for i, ix in enumerate(ixs):
+            log_probs[i] += np.log(Ps[i, ix])
         seed = np.roll(seed, -1, axis = 1)
         seed[:,-1] = ixs
     return [[int(preds[j][i]) for j in range(n_samples)]
-            for i in range(n_temps + n_top_ps)]
+            for i in range(n_temps + n_top_ps)], log_probs
 
 def main():
-    from musicgen.tensorflow import model_from_params
     # Prologue
     args = docopt(__doc__, version = 'Train MOD model 1.0')
     SP.enabled = args['--verbose']
@@ -128,11 +132,15 @@ def main():
     file_format = args['--file-format']
 
     SP.header('%d PREDICTIONS' % n_preds)
-    model = model_from_params(params, vocab_size, n_preds, True)
-    weights_path = path / params.weights_file()
-    SP.print('Loading weights from %s.' % weights_path)
-    model.load_weights(str(weights_path))
-    model.reset_states()
+    with select_strategy().scope():
+        model, model_cbs = compiled_model_from_params(params, vocab_size,
+                                                      None, False)
+        weights_path = path / params.weights_file()
+        assert weights_path.exists()
+        SP.print('Loading weights from %s...' % weights_path)
+        model.load_weights(str(weights_path))
+        SP.print('Resetting states...')
+        model.reset_states()
 
     seq = data.flatten(True)
     pause = encoder.encode_chars(data.info.long_pause, False).tolist()
@@ -167,9 +175,7 @@ def main():
     orig = seq[seed_idx + n_seed:seed_idx + n_seed + n_samples]
     seqs = np.vstack((seqs, orig))
 
-    # Cut seed in half cause it is long.
     seed = np.vstack((seed, seed[0]))
-    seed = seed[:, n_seed // 2 :]
 
     join = np.repeat(np.expand_dims(pause, 0), len(seqs), axis = 0)
     seqs = np.hstack((seed, join, seqs))
