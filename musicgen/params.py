@@ -52,10 +52,16 @@ class ModelParams:
         self.epochs = epochs
         self.type_params = type_params
 
-    def weights_file(self):
-        fmt = 'weights_%s_%s-%.2f-%03d-%.5f-%03d-%03d-%s.h5'
+    def to_string(self):
+        fmt = '%s_%s-%.2f-%03d-%.5f-%03d-%03d-%s'
         args = (self.code_type, self.model_type,
                 self.dropout, self.batch_size,
                 self.lr, self.seq_len, self.epochs,
                 self.type_params.as_file_name_part())
         return fmt % args
+
+    def weights_file(self):
+        return 'weights_%s.h5' % self.to_string()
+
+    def log_file(self):
+        return 'log_%s.log' % self.to_string()

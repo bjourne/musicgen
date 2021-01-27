@@ -1,4 +1,4 @@
-# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+# Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
 """
 Model training for music generation
 ===================================
@@ -18,20 +18,18 @@ Options:
     --lr=<f>               learning rate
     --epochs=<i>           epochs to train for
     --seq-len=<i>          training sequence length
-    --seed-idx=<i>         seed index [default: random]
 """
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
 from musicgen.params import ModelParams
-from musicgen.tensorflow import model_from_params, select_strategy
+from musicgen.tensorflow import (compiled_model_from_params,
+                                 select_strategy)
 from musicgen.training_data import load_training_data
 from musicgen.utils import SP
 from pathlib import Path
 from tensorflow.keras.callbacks import *
-from tensorflow.keras.losses import SparseCategoricalCrossentropy
-from tensorflow.keras.optimizers import *
 
 import numpy as np
 import tensorflow as tf
@@ -41,7 +39,6 @@ def main():
     args = docopt(__doc__, version = 'Train MOD model 1.0')
     SP.enabled = args['--verbose']
     path = Path(args['<corpus-path>'])
-    seed_idx = args['--seed-idx']
 
     # Hyperparameters
     params = ModelParams.from_docopt_args(args)
@@ -51,23 +48,23 @@ def main():
     SP.print('Train/valid/test split %d/%d/%d' % args)
 
     vocab_size = len(train.encoder.ix2ch)
+
     with select_strategy().scope():
-        model = model_from_params(params, vocab_size, None, False)
-        optimizer = RMSprop(learning_rate = params.lr)
-        loss_fn = SparseCategoricalCrossentropy(from_logits = True)
-        model.compile(
-            optimizer = optimizer,
-            loss = loss_fn,
-            metrics = ['sparse_categorical_accuracy'])
-    model.summary()
+        model, model_cbs = compiled_model_from_params(params, vocab_size,
+                                                      None, False)
+        weights_path = path / params.weights_file()
+        if weights_path.exists():
+            SP.print('Loading weights from %s...' % weights_path)
+            model.load_weights(str(weights_path))
+        else:
+            SP.print('Weights file %s not found.' % weights_path)
 
-    weights_path = path / params.weights_file()
-    if weights_path.exists():
-        SP.print('Loading weights from %s...' % weights_path)
-        model.load_weights(str(weights_path))
-    else:
-        SP.print('Weights file %s not found.' % weights_path)
-
+    log_path = path / params.log_file()
+    def log_losses(epoch, logs):
+        with open(log_path, 'at') as outf:
+            outf.write('%d %.5f %.5f\n'
+                       % (epoch, logs['loss'], logs['val_loss']))
+    cb_epoch_end = LambdaCallback(on_epoch_end = log_losses)
     cb_best = ModelCheckpoint(
         str(weights_path),
         monitor = 'val_loss',
@@ -75,10 +72,9 @@ def main():
         save_weights_only = True,
         save_best_only = True,
         mode = 'min')
-    reduce_lr = ReduceLROnPlateau(
-        factor = 0.2, patience = 8, min_lr = params.lr / 100)
     stopping = EarlyStopping(patience = 30)
-    callbacks = [cb_best, reduce_lr, stopping]
+    callbacks = [cb_best, stopping, cb_epoch_end]
+    callbacks.extend(model_cbs)
     SP.print('Batching samples...')
     train_ds = train.to_samples(params.seq_len) \
         .batch(params.batch_size, drop_remainder = True)

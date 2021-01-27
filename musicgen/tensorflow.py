@@ -1,4 +1,4 @@
-# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+# Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
 from musicgen.utils import SP
 from os import environ
 from tensorflow.data import Dataset
@@ -7,12 +7,17 @@ from tensorflow.config import (experimental_connect_to_cluster,
                                list_physical_devices)
 from tensorflow.distribute import OneDeviceStrategy
 from tensorflow.distribute.cluster_resolver import TPUClusterResolver
-from tensorflow.distribute.experimental import TPUStrategy
+from tensorflow.distribute import TPUStrategy
 from tensorflow.keras import *
-from tensorflow.keras.initializers import RandomUniform
+from tensorflow.keras.callbacks import ReduceLROnPlateau
+from tensorflow.keras.activations import gelu
+from tensorflow.keras.initializers import *
 from tensorflow.keras.layers import *
+from tensorflow.keras.losses import SparseCategoricalCrossentropy
+from tensorflow.keras.optimizers import *
 from tensorflow.nn import softmax
-from tensorflow.tpu.experimental import initialize_tpu_system
+from tensorflow.tpu.experimental import (initialize_tpu_system,
+                                         shutdown_tpu_system)
 import numpy as np
 import tensorflow as tf
 
@@ -210,76 +215,215 @@ def transformer_model(vocab_size, d_model, ffn_units, dropout,
     x = Dense(vocab_size, kernel_initializer = random_uniform)(x)
     return Model(inputs = inp, outputs = x)
 
-class LSTMParams:
-    def __init__(self, docopt_args):
-        self.rec_dropout = float(docopt_args['--rec-dropout'])
-        self.emb_size = int(docopt_args['--emb-size'])
-        self.lstm1_units = int(docopt_args['--lstm1-units'])
-        self.lstm2_units = int(docopt_args['--lstm2-units'])
+# GPT2 hyper params
+HIDDEN_SIZE = 768
+INITIALIZER_RANGE = 0.02
+N_POSITIONS = 1024
+N_CTX = 1024
+N_LAYER = 12
+L_NORM_EPS = 1e-5
+N_HEAD = 12
 
-    def as_file_name_part(self):
-        fmt = '%.2f-%03d-%04d-%04d'
-        args = (self.rec_dropout, self.emb_size,
-                self.lstm1_units, self.lstm2_units)
-        return fmt % args
+# Dropout rates
+EMBD_PDROP = 0.1
+ATTN_PDROP = 0.1
+RESID_PDROP = 0.1
 
-class TransformerParams:
-    def __init__(self, docopt_args):
-        pass
+def casual_attn_mask(nd, ns, dtype):
+    i = tf.range(nd)[:, None]
+    j = tf.range(ns)
+    m = i >= j - ns + nd
+    return tf.cast(m, dtype)
 
-    def as_file_name_part(self):
-        return ''
+class Conv1D(Layer):
+    def __init__(self, nf, nx, **kwargs):
+        super().__init__(**kwargs)
+        self.nf = nf
+        self.nx = nx
 
-class ModelParams:
-    @classmethod
-    def from_docopt_args(cls, args):
-        code_type = args['<code-type>']
-        model_type = 'lstm' if args['lstm'] else 'transformer'
+    def build(self, input_shape):
+        self.weight = self.add_weight(
+            "weight",
+            shape=[self.nx, self.nf],
+            initializer = TruncatedNormal(stddev = INITIALIZER_RANGE)
+        )
+        self.bias = self.add_weight(
+            "bias",
+            shape=[1, self.nf],
+            initializer=tf.zeros_initializer()
+        )
 
-        if model_type == 'lstm':
-            type_params = LSTMParams(args)
-        else:
-            type_params = TransformerParams(args)
+    def call(self, x):
+        bz, sl = x.shape[:2]
+        x = tf.reshape(x, [-1, self.nx])
+        x = tf.matmul(x, self.weight) + self.bias
+        x = tf.reshape(x, [bz, sl, self.nf])
+        return x
 
-        dropout = float(args['--dropout'])
-        batch_size = int(args['--batch-size'])
-        lr = float(args['--lr'])
-        seq_len = int(args['--seq-len'])
-        epochs = int(args['--epochs'])
-        return cls(code_type, model_type,
-                   dropout, batch_size, lr, seq_len, epochs,
-                   type_params)
+class Attn(Layer):
+    def __init__(self):
+        super().__init__()
+        self.c_attn = Conv1D(3 * HIDDEN_SIZE, HIDDEN_SIZE,
+                             name = 'c_attn')
+        self.c_proj = Conv1D(HIDDEN_SIZE, HIDDEN_SIZE,
+                             name = 'c_proj')
+        self.attn_dropout = Dropout(ATTN_PDROP)
+        self.resid_dropout = Dropout(RESID_PDROP)
 
-    def __init__(self,
-                 code_type, model_type,
-                 dropout, batch_size, lr, seq_len, epochs,
-                 type_params):
-        self.code_type = code_type
-        self.model_type = model_type
+    def split_heads(self, x):
+        new_x_shape = x.shape[:-1] + [N_HEAD, x.shape[-1] // N_HEAD]
+        x = tf.reshape(x, new_x_shape)
+        return tf.transpose(x, (0, 2, 1, 3))
 
-        self.dropout = dropout
-        self.batch_size = batch_size
-        self.lr = lr
-        self.seq_len = seq_len
-        self.epochs = epochs
-        self.type_params = type_params
+    def merge_heads(self, x):
+        x = tf.transpose(x, (0, 2, 1, 3))
+        new_x_shape = x.shape[:-2] + [x.shape[-2] * x.shape[-1]]
+        return tf.reshape(x, new_x_shape)
 
-    def weights_file(self):
-        fmt = 'weights_%s_%s-%.2f-%03d-%.5f-%03d-%03d-%s.h5'
-        args = (self.code_type, self.model_type,
-                self.dropout, self.batch_size,
-                self.lr, self.seq_len, self.epochs,
-                self.type_params.as_file_name_part())
-        return fmt % args
+    def attn(self, q, k, v, training):
+        w = tf.matmul(q, k, transpose_b = True)
 
+        # Always scale
+        dk = tf.cast(k.shape[-1], dtype = w.dtype)
+        w = w / tf.math.sqrt(dk)
 
-def model_from_params(params, vocab_size, batch_size, stateful):
+        _, _, nd, ns = w.shape
+        b = casual_attn_mask(nd, ns, dtype = w.dtype)
+        b = tf.reshape(b, (1, 1, nd, ns))
+        w = w * b - 1e4 * (1 - b)
+
+        w = tf.nn.softmax(w, axis = -1)
+        # Dropout follows softmax?
+        w = self.attn_dropout(w, training = training)
+
+        return tf.matmul(w, v)
+
+    def call(self, x, training):
+        x = self.c_attn(x)
+        q, k, v = tf.split(x, 3, axis = 2)
+        q = self.split_heads(q)
+        k = self.split_heads(k)
+        v = self.split_heads(v)
+
+        a = self.attn(q, k, v, training)
+        a = self.merge_heads(a)
+        a = self.c_proj(a)
+        a = self.resid_dropout(a, training = training)
+        return a
+
+class Block(Layer):
+    def __init__(self):
+        super().__init__()
+        self.ln_1 = LayerNormalization(epsilon = L_NORM_EPS,
+                                       name = 'ln_1')
+        self.attn = Attn()
+        self.ln_2 = LayerNormalization(epsilon = L_NORM_EPS,
+                                       name = 'ln_2')
+
+        n_state = 4 * HIDDEN_SIZE
+        self.c_fc = Conv1D(n_state, HIDDEN_SIZE, name = 'c_fc')
+        self.c_proj = Conv1D(HIDDEN_SIZE, n_state, name = 'c_proj')
+        self.dropout = Dropout(RESID_PDROP)
+
+    def call(self, x, training):
+        a = self.ln_1(x)
+        a = self.attn(a, training)
+        x = x + a
+
+        m = self.ln_2(x)
+        m = gelu(self.c_fc(m))
+        m = self.c_proj(m)
+        m = self.dropout(m, training = training)
+
+        x = x + m
+        return x
+
+class SharedEmbeddings(Layer):
+    def __init__(self, vocab_size):
+        super().__init__(name = 'wte')
+        self.vocab_size = vocab_size
+
+    def build(self, input_shape):
+        initializer = TruncatedNormal(stddev = INITIALIZER_RANGE)
+        self.weight = self.add_weight(
+            "weight",
+            shape = [self.vocab_size, HIDDEN_SIZE],
+            initializer = initializer
+        )
+        super().build(input_shape)
+
+    def call(self, inputs, mode):
+        if mode == "embedding":
+            return tf.gather(self.weight, inputs)
+        elif mode == "linear":
+            first_dims = inputs.shape[:-1]
+            x = tf.reshape(inputs, [-1, HIDDEN_SIZE])
+            logits = tf.matmul(x, self.weight, transpose_b=True)
+            return tf.reshape(logits, first_dims + [self.vocab_size])
+
+class GPT2(Model):
+    def __init__(self, vocab_size):
+        super(GPT2, self).__init__()
+        self.wte = SharedEmbeddings(vocab_size)
+        initializer = TruncatedNormal(stddev = INITIALIZER_RANGE)
+        self.wpe = Embedding(
+            N_POSITIONS,
+            HIDDEN_SIZE,
+            embeddings_initializer = initializer,
+            name = 'wpe')
+        self.h = [Block() for _ in range(N_LAYER)]
+        self.ln_f = LayerNormalization(epsilon = L_NORM_EPS)
+        self.drop = Dropout(EMBD_PDROP)
+
+    def call(self, inputs, training = False):
+        input_ids = inputs
+        input_shape = input_ids.shape
+        input_ids = tf.reshape(input_ids, [-1, input_shape[-1]])
+
+        position_ids = tf.range(0, input_shape[-1],
+                                dtype = tf.int32)[tf.newaxis, :]
+
+        # Prepare head mask if needed
+        # 1.0 in head_mask indicate we keep the head
+        # attention_probs has shape bsz x n_heads x N x N
+        position_ids = tf.reshape(position_ids,
+                                  [-1, position_ids.shape[-1]])
+
+        inputs_embeds = self.wte(input_ids, mode = "embedding")
+        position_embeds = self.wpe(position_ids)
+
+        hs = inputs_embeds + position_embeds
+        hs = self.drop(hs, training = training)
+
+        output_shape = input_shape + [hs.shape[-1]]
+
+        for block in self.h:
+            hs = block(hs, training)
+
+        hs = self.ln_f(hs)
+        hs = tf.reshape(hs, output_shape)
+
+        return self.wte(hs, mode = 'linear')
+
+def compiled_model_from_params(params, vocab_size, batch_size, stateful):
     if params.model_type == 'transformer':
-        return transformer_model(vocab_size, 128, 2048, 0.2, 8, 16)
-    return lstm_model(vocab_size,
-                      params.type_params.emb_size,
-                      params.type_params.lstm1_units,
-                      params.type_params.lstm2_units,
-                      params.dropout,
-                      params.type_params.rec_dropout,
-                      stateful, batch_size)
+        model = GPT2(vocab_size)
+        opt = Adam(learning_rate=3e-5, epsilon=1e-08)
+        cbs = []
+    else:
+        model = lstm_model(vocab_size,
+                           params.type_params.emb_size,
+                           params.type_params.lstm1_units,
+                           params.type_params.lstm2_units,
+                           params.dropout,
+                           params.type_params.rec_dropout,
+                           stateful, batch_size)
+        opt = RMSprop(learning_rate = params.lr)
+        cbs = [ReduceLROnPlateau(
+            factor = 0.2, patience = 8, min_lr = params.lr / 100)]
+    loss_fn = SparseCategoricalCrossentropy(from_logits = True)
+    metrics = ['sparse_categorical_accuracy']
+    model.compile(optimizer = opt, loss = loss_fn, metrics = metrics)
+    model(tf.constant([[0]]))
+    model.summary()
+    return model, cbs
