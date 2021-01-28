@@ -49,7 +49,7 @@ def top_p_skew(P, top_p):
     P[prob_ixs[top_n:]] = 0.0
     return P / P.sum()
 
-def lstm_continuation(model, temps, top_ps, seed, n_samples):
+def lstm_continuation(model, temps, top_ps, seed, n_samples, max_seq_len):
 
     SP.print('Priming the model with %d tokens.' % seed.shape[1])
     for i in trange(seed.shape[1] - 1):
@@ -82,7 +82,8 @@ def lstm_continuation(model, temps, top_ps, seed, n_samples):
     # Skip the first element which is not actually a prediction.
     return preds.T[:,1:], log_probs
 
-def transformer_continuation(model, temps, top_ps, seed, n_samples):
+def transformer_continuation(model, temps, top_ps, seed, n_samples,
+                             max_seq_len):
     seed = np.array(seed, dtype = np.int32)
     n_temps = len(temps)
     n_top_ps = len(top_ps)
@@ -105,8 +106,12 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples):
 
         for i, ix in enumerate(ixs):
             log_probs[i] += np.log(Ps[i, ix])
-        seed = np.roll(seed, -1, axis = 1)
-        seed[:,-1] = ixs
+
+        # Append column
+        seed = np.append(seed, np.expand_dims(ixs, 1), axis = 1)
+        if seed.shape[1] >= max_seq_len:
+            # Delete first column
+            seed = seed[:, 1:]
     return [[int(preds[j][i]) for j in range(n_samples)]
             for i in range(n_temps + n_top_ps)], log_probs
 
@@ -118,7 +123,7 @@ def main():
 
     params = ModelParams.from_docopt_args(args)
     _, _, data = load_training_data(params.code_type, path)
-    temps = [0.90, 0.95, 1.0, 1.05, 1.10]
+    temps = [0.90, 0.95, 1.0, 1.02, 1.05]
     top_ps = [0.85, 0.90, 0.94, 0.98, 0.99]
 
     n_temps = len(temps)
@@ -129,19 +134,13 @@ def main():
     encoder = data.encoder
     vocab_size = len(encoder.ix2ch)
     seed_idx = args['--seed-idx']
+    max_seq_len = int(args['--seq-len'])
     file_format = args['--file-format']
 
     SP.header('%d PREDICTIONS' % n_preds)
-    with select_strategy().scope():
-        model, model_cbs = compiled_model_from_params(params, vocab_size,
-                                                      None, False)
-        weights_path = path / params.weights_file()
-        assert weights_path.exists()
-        SP.print('Loading weights from %s...' % weights_path)
-        model.load_weights(str(weights_path))
-        SP.print('Resetting states...')
-        model.reset_states()
 
+    model = compiled_model_from_params(path, params, vocab_size,
+                                       n_preds, True)
     seq = data.flatten(True)
     pause = encoder.encode_chars(data.info.long_pause, False).tolist()
 
@@ -170,7 +169,9 @@ def main():
         cont_fn = transformer_continuation
     else:
         cont_fn = lstm_continuation
-    seqs, log_probs = cont_fn(model, temps, top_ps, seed, n_samples)
+
+    seqs, log_probs = cont_fn(model, temps, top_ps, seed, n_samples,
+                              max_seq_len)
 
     # Add the original
     orig = seq[seed_idx + n_seed:seed_idx + n_seed + n_samples]
@@ -189,7 +190,6 @@ def main():
     file_names.append('%s-orig' % prefix)
     log_probs.append(0)
 
-    #file_names = ['%s.%s' % (f, file_format) for f in file_names]
     for file_name, seq, log_prob in zip(file_names, seqs, log_probs):
         file_name = '%s-%04d.%s' % (file_name, -log_prob, file_format)
         file_path = path / file_name

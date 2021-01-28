@@ -51,21 +51,15 @@ def main():
 
     vocab_size = len(train.encoder.ix2ch)
 
-    with select_strategy().scope():
-        model, model_cbs = compiled_model_from_params(params, vocab_size,
-                                                      None, False)
-        weights_path = path / params.weights_file()
-        if weights_path.exists():
-            SP.print('Loading weights from %s...' % weights_path)
-            model.load_weights(str(weights_path))
-        else:
-            SP.print('Weights file %s not found.' % weights_path)
+    model = compiled_model_from_params(path, params, vocab_size,
+                                       None, False)
 
     log_path = path / params.log_file()
     def log_losses(epoch, logs):
         with open(log_path, 'at') as outf:
             outf.write('%d %.5f %.5f\n'
                        % (epoch, logs['loss'], logs['val_loss']))
+    weights_path = path / params.weights_file()
     cb_epoch_end = LambdaCallback(on_epoch_end = log_losses)
     cb_best = ModelCheckpoint(
         str(weights_path),
@@ -74,9 +68,12 @@ def main():
         save_weights_only = True,
         save_best_only = True,
         mode = 'min')
-    stopping = EarlyStopping(patience = 30)
-    callbacks = [cb_best, stopping, cb_epoch_end]
-    callbacks.extend(model_cbs)
+    stopping = EarlyStopping(patience = 30, verbose = 1)
+    reduce_lr = ReduceLROnPlateau(
+        factor = 0.2, patience = 8,
+        min_lr = params.lr / 100,
+        verbose = 1)
+    callbacks = [reduce_lr, cb_best, stopping, cb_epoch_end]
     SP.print('Batching samples...')
     train_ds = train.to_samples(params.seq_len) \
         .batch(params.batch_size, drop_remainder = True)

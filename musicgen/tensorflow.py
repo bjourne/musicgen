@@ -80,7 +80,7 @@ def generate_sequences(model, temps, seed, length, excluded):
         Ps = model.predict(last_word)[:, 0, :]
 
         # Assign a very low probability to tokens to be avoided.
-        Ps[:,excluded] = eps
+        Ps[:, excluded] = eps
 
         # Weigh probs according to temps
         Ps = np.exp(np.log(Ps) / temps)
@@ -148,7 +148,6 @@ def transformer(vocab_size, d_model, ffn_units, dropout,
                 n_layers, n_heads, seq_len):
     # Input and look-ahead mask
     inp = Input(shape = (None,))
-    mask = 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
 
     # Variables
     depth = d_model // n_heads
@@ -171,6 +170,9 @@ def transformer(vocab_size, d_model, ffn_units, dropout,
 
     # Shapes
     batch_size = tf.shape(x)[0]
+    seq_len = tf.shape(x)[1]
+
+    mask = 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
 
     # Hopefully this is only calculated once?
     x = x + pos_encoding[:, :seq_len, :]
@@ -219,7 +221,6 @@ def transformer(vocab_size, d_model, ffn_units, dropout,
 HIDDEN_SIZE = 768
 INITIALIZER_RANGE = 0.02
 N_POSITIONS = 1024
-N_CTX = 1024
 N_LAYER = 12
 L_NORM_EPS = 1e-5
 N_HEAD = 12
@@ -405,30 +406,55 @@ class GPT2(Model):
 
         return self.wte(hs, mode = 'linear')
 
-def compiled_model_from_params(params, vocab_size, batch_size, stateful):
-    type = params.model_type
-    if type == 'transformer':
-        model = transformer(vocab_size, 128, 2048, 0.2, 8, 16,
-                            params.seq_len)
-        opt = RMSprop(learning_rate = params.lr)
-    elif type == 'gpt2':
-        model = GPT2(vocab_size)
-        # 3e-5
-        opt = Adam(learning_rate=params.lr, epsilon=1e-08)
+# Incredibly convoluted code follows:
+def compiled_model_from_params(path, params, vocab_size,
+                               batch_size, stateful):
+    mtype = params.model_type
+    if mtype == 'transformer':
+        strategy = select_strategy()
+        with strategy.scope():
+            model = transformer(vocab_size, 128, 2048, 0.2, 8, 16,
+                                params.seq_len)
+            opt = RMSprop(learning_rate = params.lr)
+    elif mtype == 'gpt2':
+        strategy = select_strategy()
+        with strategy.scope():
+            model = GPT2(vocab_size)
+            # 3e-5
+            opt = Adam(learning_rate=params.lr, epsilon=1e-08)
     else:
-        model = lstm_model(vocab_size,
-                           params.type_params.emb_size,
-                           params.type_params.lstm1_units,
-                           params.type_params.lstm2_units,
-                           params.dropout,
-                           params.type_params.rec_dropout,
-                           stateful, batch_size)
         opt = RMSprop(learning_rate = params.lr)
-    cbs = [ReduceLROnPlateau(
-        factor = 0.2, patience = 8, min_lr = params.lr / 100)]
-    loss_fn = SparseCategoricalCrossentropy(from_logits = True)
-    metrics = ['sparse_categorical_accuracy']
-    model.compile(optimizer = opt, loss = loss_fn, metrics = metrics)
-    model(tf.constant([[0]]))
+        if stateful:
+            model = lstm_model(vocab_size,
+                               params.type_params.emb_size,
+                               params.type_params.lstm1_units,
+                               params.type_params.lstm2_units,
+                               0.0, 0.0,
+                               stateful, batch_size)
+        else:
+            with strategy.scope():
+                model = lstm_model(vocab_size,
+                                   params.type_params.emb_size,
+                                   params.type_params.lstm1_units,
+                                   params.type_params.lstm2_units,
+                                   params.type_params.dropout,
+                                   params.type_params.rec_dropout,
+                                   stateful, batch_size)
+
+    if mtype in ('transformer', 'gpt2') or not stateful:
+        with strategy.scope():
+            loss_fn = SparseCategoricalCrossentropy(from_logits = True)
+            metrics = ['sparse_categorical_accuracy']
+            model.compile(optimizer = opt, loss = loss_fn,
+                          metrics = metrics)
+            model(tf.constant([[0]]))
+
+    weights_path = path / params.weights_file()
+    if weights_path.exists():
+        SP.print('Loading weights from %s...' % weights_path)
+        model.load_weights(str(weights_path))
+    else:
+        SP.print('Weights file %s not found.' % weights_path)
+    model.reset_states()
     model.summary()
-    return model, cbs
+    return model
