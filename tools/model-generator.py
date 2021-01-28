@@ -9,7 +9,7 @@ Usage:
         --dropout=<f> --rec-dropout=<f>
         --lstm1-units=<i> --lstm2-units=<i>
     model-generator.py [options] <code-type> transformer <corpus-path>
-        --dropout=<f>
+    model-generator.py [options] <code-type> gpt2 <corpus-path>
 
 Options:
     -h --help              show this screen
@@ -31,6 +31,7 @@ from musicgen.training_data import load_training_data
 from musicgen.utils import SP, find_subseq
 from pathlib import Path
 from random import randrange
+from tensorflow.nn import softmax
 from tqdm import trange
 
 import numpy as np
@@ -49,7 +50,7 @@ def top_p_skew(P, top_p):
     return P / P.sum()
 
 def lstm_continuation(model, temps, top_ps, seed, n_samples):
-    from tensorflow.nn import softmax
+
     SP.print('Priming the model with %d tokens.' % seed.shape[1])
     for i in trange(seed.shape[1] - 1):
         model.predict(seed[:, i])
@@ -82,7 +83,6 @@ def lstm_continuation(model, temps, top_ps, seed, n_samples):
     return preds.T[:,1:], log_probs
 
 def transformer_continuation(model, temps, top_ps, seed, n_samples):
-    from tensorflow.nn import softmax
     seed = np.array(seed, dtype = np.int32)
     n_temps = len(temps)
     n_top_ps = len(top_ps)
@@ -165,7 +165,8 @@ def main():
     SP.print('Seed %d+%d.' % (seed_idx, n_seed))
     seed = np.repeat(np.expand_dims(seed, 0), n_preds, axis = 0)
 
-    if params.model_type == 'transformer':
+    mtype = params.model_type
+    if mtype in ('transformer', 'gpt2'):
         cont_fn = transformer_continuation
     else:
         cont_fn = lstm_continuation
@@ -180,7 +181,7 @@ def main():
     join = np.repeat(np.expand_dims(pause, 0), len(seqs), axis = 0)
     seqs = np.hstack((seed, join, seqs))
 
-    prefix = '%s-%09d' % (data.code_type, seed_idx)
+    prefix = '%s-%s-%09d' % (data.code_type, mtype, seed_idx)
     file_names = ['%s-t%.3f' % (prefix, t) for t in temps]
     file_names += ['%s-p%.3f' % (prefix, p) for p in top_ps]
 

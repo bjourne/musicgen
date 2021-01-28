@@ -5,12 +5,13 @@ Model training for music generation
 
 Usage:
     model-trainer.py [options] <code-type> lstm
-        <corpus-path> --emb-size=<i> --batch-size=<i>
+        <corpus-path> --emb-size=<i>
         --dropout=<f> --rec-dropout=<f>
         --lstm1-units=<i> --lstm2-units=<i>
     model-trainer.py [options]
         <code-type> transformer <corpus-path>
-        --dropout=<f> --batch-size=<i>
+    model-trainer.py [options]
+        <code-type> gpt2 <corpus-path>
 
 Options:
     -h --help              show this screen
@@ -18,6 +19,7 @@ Options:
     --lr=<f>               learning rate
     --epochs=<i>           epochs to train for
     --seq-len=<i>          training sequence length
+    --batch-size=<i>       batch size
 """
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'

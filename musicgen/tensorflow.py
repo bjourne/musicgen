@@ -2,9 +2,7 @@
 from musicgen.utils import SP
 from os import environ
 from tensorflow.data import Dataset
-from tensorflow.config import (experimental_connect_to_cluster,
-                               list_logical_devices,
-                               list_physical_devices)
+from tensorflow.config import *
 from tensorflow.distribute import OneDeviceStrategy
 from tensorflow.distribute.cluster_resolver import TPUClusterResolver
 from tensorflow.distribute import TPUStrategy
@@ -146,41 +144,41 @@ def split_heads(inp, n_heads, depth, batch_size):
     inp = tf.reshape(inp, (batch_size, -1, n_heads, depth))
     return tf.transpose(inp, perm = [0, 2, 1, 3])
 
-def transformer_model(vocab_size, d_model, ffn_units, dropout,
-                      n_layers, n_heads):
+def transformer(vocab_size, d_model, ffn_units, dropout,
+                n_layers, n_heads, seq_len):
+    # Input and look-ahead mask
+    inp = Input(shape = (None,))
+    mask = 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
 
-    # Variables.
+    # Variables
     depth = d_model // n_heads
-    d_model_f32 = tf.cast(d_model, tf.float32)
     depth_f32 = tf.cast(depth, tf.float32)
+    d_model_f32 = tf.cast(d_model, tf.float32)
 
-    # Setup the position encoding
+    # Setup pos encoding
     pos = tf.range(5000, dtype = tf.float32)[:, tf.newaxis]
     i = tf.range(d_model, dtype = tf.float32)[tf.newaxis, :]
-    angle_rads = pos / tf.pow(10_000, (2 * (i // 2)) / d_model_f32)
-    sines = tf.math.sin(angle_rads[:, 0::2])
-    cosines = tf.math.cos(angle_rads[:, 1::2])
+    rads = pos / tf.pow(10_000, (2 * (i // 2)) / d_model_f32)
+    sines = tf.math.sin(rads[:, 0::2])
+    cosines = tf.math.cos(rads[:, 1::2])
     pos_encoding = tf.concat([sines, cosines], axis = -1)
     pos_encoding = tf.expand_dims(pos_encoding, 0)
-
-    # Input and look-ahead mask.
-    inp = Input(shape = (None,))
 
     random_uniform = RandomUniform(-0.1, 0.1)
     x = Embedding(vocab_size, d_model,
                   embeddings_initializer = random_uniform)(inp)
-    x *= tf.math.sqrt(d_model_f32)
+    x *= tf.math.sqrt(tf.cast(d_model, tf.float32))
 
-    # Important variables.
+    # Shapes
     batch_size = tf.shape(x)[0]
-    seq_len = tf.shape(x)[1]
 
     # Hopefully this is only calculated once?
-    x += pos_encoding[:, :seq_len, :]
+    x = x + pos_encoding[:, :seq_len, :]
     x = Dropout(dropout)(x)
 
-    # Look-ahead mask
-    mask = 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
+    # For head splitting/merging
+    split_pat = (batch_size, -1, n_heads, depth)
+    transp_pat = (0, 2, 1, 3)
 
     for _ in range(n_layers):
         # Multihead attention part
@@ -188,9 +186,10 @@ def transformer_model(vocab_size, d_model, ffn_units, dropout,
         wk = Dense(d_model)(x)
         wv = Dense(d_model)(x)
 
-        q = split_heads(wq, n_heads, depth, batch_size)
-        k = split_heads(wk, n_heads, depth, batch_size)
-        v = split_heads(wv, n_heads, depth, batch_size)
+        # Split heads
+        q = tf.transpose(tf.reshape(wq, split_pat), transp_pat)
+        k = tf.transpose(tf.reshape(wk, split_pat), transp_pat)
+        v = tf.transpose(tf.reshape(wv, split_pat), transp_pat)
 
         # Scaled dot product attention
         matmul_qk = tf.matmul(q, k, transpose_b = True)
@@ -198,9 +197,10 @@ def transformer_model(vocab_size, d_model, ffn_units, dropout,
         weights = softmax(logits, axis = -1)
         attn = tf.matmul(weights, v)
 
-        # Pass through dense layer and normalize.
-        attn = tf.transpose(attn, perm = [0, 2, 1, 3])
+        # Merge heads
+        attn = tf.transpose(attn, transp_pat)
         attn = tf.reshape(attn, (batch_size, -1, d_model))
+
         attn = Dense(d_model)(attn)
         attn = Dropout(dropout)(attn)
         x = LayerNormalization(epsilon = TRANSF_EPS)(x + attn)
@@ -406,10 +406,15 @@ class GPT2(Model):
         return self.wte(hs, mode = 'linear')
 
 def compiled_model_from_params(params, vocab_size, batch_size, stateful):
-    if params.model_type == 'transformer':
+    type = params.model_type
+    if type == 'transformer':
+        model = transformer(vocab_size, 128, 2048, 0.2, 8, 16,
+                            params.seq_len)
+        opt = RMSprop(learning_rate = params.lr)
+    elif type == 'gpt2':
         model = GPT2(vocab_size)
-        opt = Adam(learning_rate=3e-5, epsilon=1e-08)
-        cbs = []
+        # 3e-5
+        opt = Adam(learning_rate=params.lr, epsilon=1e-08)
     else:
         model = lstm_model(vocab_size,
                            params.type_params.emb_size,
@@ -419,8 +424,8 @@ def compiled_model_from_params(params, vocab_size, batch_size, stateful):
                            params.type_params.rec_dropout,
                            stateful, batch_size)
         opt = RMSprop(learning_rate = params.lr)
-        cbs = [ReduceLROnPlateau(
-            factor = 0.2, patience = 8, min_lr = params.lr / 100)]
+    cbs = [ReduceLROnPlateau(
+        factor = 0.2, patience = 8, min_lr = params.lr / 100)]
     loss_fn = SparseCategoricalCrossentropy(from_logits = True)
     metrics = ['sparse_categorical_accuracy']
     model.compile(optimizer = opt, loss = loss_fn, metrics = metrics)
