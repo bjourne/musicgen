@@ -90,13 +90,11 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples,
     n_preds = n_temps + n_top_ps
     log_probs = [0] * n_preds
     preds = []
-
     SP.print('Predicting %d tokens.' % n_samples)
     for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
         y = model(seed)
         Ps = y[:, -1, :]
         Ps = softmax(Ps).numpy()
-
         for i in range(n_temps):
             Ps[i] = temperature_skew(Ps[i], temps[i])
         for i in range(n_top_ps):
@@ -107,6 +105,7 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples,
         for i, ix in enumerate(ixs):
             log_probs[i] += np.log(Ps[i, ix])
 
+        # print(np.sum(Ps > 0.05, axis = 1))
         # Append column
         seed = np.append(seed, np.expand_dims(ixs, 1), axis = 1)
         if seed.shape[1] >= max_seq_len:
@@ -123,8 +122,8 @@ def main():
 
     params = ModelParams.from_docopt_args(args)
     _, _, data = load_training_data(params.code_type, path)
-    temps = [0.90, 0.95, 1.0, 1.02, 1.05]
-    top_ps = [0.85, 0.90, 0.94, 0.98, 0.99]
+    temps = [0.90, 0.95, 1.0, 1.01, 1.02]
+    top_ps = [0.87, 0.90, 0.94, 0.98, 0.99]
 
     n_temps = len(temps)
     n_top_ps = len(top_ps)
@@ -190,9 +189,12 @@ def main():
     file_names.append('%s-orig' % prefix)
     log_probs.append(0)
 
+    base_path = path / 'generated'
+    base_path.mkdir(exist_ok = True)
+
     for file_name, seq, log_prob in zip(file_names, seqs, log_probs):
         file_name = '%s-%04d.%s' % (file_name, -log_prob, file_format)
-        file_path = path / file_name
+        file_path = base_path / file_name
         data.save_code(seq, file_path)
 
 if __name__ == '__main__':

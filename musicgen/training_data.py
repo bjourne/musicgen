@@ -178,14 +178,15 @@ class TrainingData:
     def flatten(self, add_pause):
         pause = self.encoder.encode_chars(self.info.long_pause, False)
         padded = []
+        SP.print('Flattening %d arrays.' % len(self.arrs))
         for name, arr in self.arrs:
             assert len(arr) > 0
             for arr2 in arr:
                 padded.append(arr2)
                 if add_pause:
                     padded.append(pause)
-        s = np.concatenate(padded)
-        return s
+        SP.print('Concatenating...')
+        return np.concatenate(padded)
 
     def to_samples(self, length):
         from musicgen.tensorflow import sequence_to_samples
@@ -202,3 +203,9 @@ def load_training_data(code_type, path):
         train = valid = test = td
     td.print_histogram()
     return train, valid, test
+
+if __name__ == '__main__':
+    from pathlib import Path
+    from sys import argv
+    SP.enabled = True
+    load_training_data('pcode_abs', Path(argv[1]))

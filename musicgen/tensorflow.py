@@ -410,14 +410,13 @@ class GPT2(Model):
 def compiled_model_from_params(path, params, vocab_size,
                                batch_size, stateful):
     mtype = params.model_type
+    strategy = select_strategy()
     if mtype == 'transformer':
-        strategy = select_strategy()
         with strategy.scope():
             model = transformer(vocab_size, 128, 2048, 0.2, 8, 16,
                                 params.seq_len)
             opt = RMSprop(learning_rate = params.lr)
     elif mtype == 'gpt2':
-        strategy = select_strategy()
         with strategy.scope():
             model = GPT2(vocab_size)
             # 3e-5
@@ -455,6 +454,8 @@ def compiled_model_from_params(path, params, vocab_size,
         model.load_weights(str(weights_path))
     else:
         SP.print('Weights file %s not found.' % weights_path)
+    if stateful:
+        assert weights_path.exists()
     model.reset_states()
     model.summary()
     return model
