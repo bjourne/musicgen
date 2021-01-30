@@ -406,7 +406,10 @@ class GPT2(Model):
 
         return self.wte(hs, mode = 'linear')
 
-# Incredibly convoluted code follows:
+# Incredibly convoluted code follows. Note that the batch size is the
+# number of sequences to generate and not the batch size the model was
+# trained with.
+
 def compiled_model_from_params(path, params, vocab_size,
                                batch_size, stateful):
     mtype = params.model_type

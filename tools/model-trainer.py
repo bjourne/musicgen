@@ -26,8 +26,7 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
 from musicgen.params import ModelParams
-from musicgen.tensorflow import (compiled_model_from_params,
-                                 select_strategy)
+from musicgen.tensorflow import compiled_model_from_params
 from musicgen.training_data import load_training_data
 from musicgen.utils import SP
 from pathlib import Path

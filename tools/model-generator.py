@@ -105,7 +105,6 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples,
         for i, ix in enumerate(ixs):
             log_probs[i] += np.log(Ps[i, ix])
 
-        # print(np.sum(Ps > 0.05, axis = 1))
         # Append column
         seed = np.append(seed, np.expand_dims(ixs, 1), axis = 1)
         if seed.shape[1] >= max_seq_len:
