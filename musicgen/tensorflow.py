@@ -102,7 +102,8 @@ def compute_and_apply_gradients(model, x, y):
                                    regularization_losses = model.losses)
     vars = model.trainable_variables
     grads = tape.gradient(loss, vars)
-    grads, _ = tf.clip_by_global_norm(grads, 15)
+    # Not sure what the proper gradient clipping should be.
+    grads, _ = tf.clip_by_global_norm(grads, 5)
     model.optimizer.apply_gradients(zip(grads, vars))
     return y_hat
 
@@ -170,7 +171,9 @@ def transformer(vocab_size, d_model, ffn_units, dropout,
 
     # Shapes
     batch_size = tf.shape(x)[0]
-    seq_len = tf.shape(x)[1]
+
+    # Idk why this doesn't work.
+    #seq_len = tf.shape(x)[1]
 
     mask = 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
 

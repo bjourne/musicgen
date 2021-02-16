@@ -79,8 +79,23 @@ def mod_file_to_code_w_progress(i, n, file_path, info):
         SP.leave()
         return None
 
-    codes = [code]
     SP.leave()
+    return code
+
+def transpose_code(code):
+    pitches = [p for (c, p) in code if c == 'P']
+
+    n_versions = 36 - max(pitches)
+    assert n_versions > 0
+    SP.print('%d transpositions.' % n_versions)
+
+    codes = [[(c, p) if c != 'P' else (c, p + i)
+              for (c, p) in code]
+             for i in range(n_versions)]
+    for i, code in enumerate(codes):
+        pitches = [p for (c, p) in code if c == 'P']
+        assert min(pitches) == i
+        assert max(pitches) <= 35
     return codes
 
 def build_cache(path, shuffle_file, mods, info):
@@ -98,9 +113,10 @@ def build_cache(path, shuffle_file, mods, info):
     encoder = CharEncoder()
     arrs = []
     for i, p, in enumerate(sorted(mod_files)):
-        codes = mod_file_to_code_w_progress(i + 1, n, p, info)
-        if not codes:
+        code = mod_file_to_code_w_progress(i + 1, n, p, info)
+        if not code:
             continue
+        codes = transpose_code(code)
         codes = [encoder.encode_chars(c, True) for c in codes]
         arrs.append((p.name, codes))
 
@@ -139,18 +155,6 @@ class TrainingData:
         code = mod_file_to_code_w_progress(1, 1, p, self.info.to_code_fn)
         self.encoder = CharEncoder()
         self.arrs = [(p.name, self.encoder.encode_chars(code, True))]
-
-    def print_histogram(self):
-        seq = self.flatten(False)
-        unique, counts = np.unique(seq, return_counts = True)
-        ix_counts = dict(zip(unique, counts))
-        ch_counts = {self.encoder.decode_char(ix) : cnt
-                     for (ix, cnt) in ix_counts.items()}
-        total = sum(ch_counts.values())
-        SP.header('%d TOKENS %d TYPES' % (total, len(ch_counts)))
-        for (cmd, arg), cnt in sorted(ch_counts.items()):
-            SP.print('%s %3d %10d' % (cmd, arg, cnt))
-        SP.leave()
 
     def split_3way(self, train_frac, valid_frac):
         n_mods = len(self.arrs)
@@ -193,6 +197,18 @@ class TrainingData:
         seq = self.flatten(True)
         return sequence_to_samples(seq, length)
 
+def print_histogram(td):
+    seq = td.flatten(False)
+    unique, counts = np.unique(seq, return_counts = True)
+    ix_counts = dict(zip(unique, counts))
+    ch_counts = {td.encoder.decode_char(ix) : cnt
+                 for (ix, cnt) in ix_counts.items()}
+    total = sum(ch_counts.values())
+    SP.header('%d TOKENS %d TYPES' % (total, len(ch_counts)))
+    for (cmd, arg), cnt in sorted(ch_counts.items()):
+        SP.print('%s %3d %10d' % (cmd, arg, cnt))
+    SP.leave()
+
 def load_training_data(code_type, path):
     td = TrainingData(code_type)
     if path.is_dir():
@@ -201,7 +217,7 @@ def load_training_data(code_type, path):
     else:
         td.load_mod_file(path)
         train = valid = test = td
-    td.print_histogram()
+    print_histogram(td)
     return train, valid, test
 
 if __name__ == '__main__':
