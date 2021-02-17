@@ -23,7 +23,6 @@ def main():
     args = docopt(__doc__, version = 'Pickle to audio 1.0')
     SP.enabled = args['--verbose']
     files = args['<files>']
-    print('FILES', files)
     file_paths = [Path(f) for f in files]
 
     for file_path in file_paths:
@@ -35,6 +34,7 @@ def main():
         dir = file_path.parent
         stem = file_path.stem
         output_file = dir / (stem + '.mid')
+        SP.print('Creating %s.' %  output_file)
         notes_to_audio_file(notes, output_file, CODE_MIDI_MAPPING, False)
 
 

@@ -19,5 +19,4 @@ def test_find_min_ssr():
         ]
     for seq, best_ssr in examples:
         min_ssr = find_min_ssr(seq)
-        print(seq, min_ssr)
         assert min_ssr == best_ssr

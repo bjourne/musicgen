@@ -57,7 +57,7 @@ def token_distribution_plot(td, png_path):
     tot = sum(values)
     values = [v / tot for v in values]
 
-    fig, ax = plt.subplots(figsize = (12, 4))
+    fig, ax = plt.subplots(figsize = (12, 6))
     bars = ax.bar(np.arange(len(values)), values, width = 0.80)
     for bar, name in zip(bars, names):
         if name[0] == 'D':
@@ -72,9 +72,9 @@ def token_distribution_plot(td, png_path):
     ax.set_xticklabels(names, rotation = 45,
                        rotation_mode = 'anchor',
                        ha = 'right')
-    title = "Dataset's token distribution (n = {:,})".format(tot)
+    #title = "Dataset's token distribution (n = {:,})".format(tot)
     tot_fmt = '{:,}'.format(sum(values))
-    ax.set(xlabel = 'token', ylabel = 'freq.', title = title)
+    ax.set(xlabel = 'token', ylabel = 'freq.') #, title = title)
     ax.grid()
     fig.savefig(png_path)
 
@@ -88,16 +88,15 @@ def main():
 
     # Hyperparameters
     params = ModelParams.from_docopt_args(args)
-    log_path = path / params.log_file()
-    png_path = path / ('loss-%s.png' % params.to_string())
-    loss_plot(log_path, png_path)
 
     td = TrainingData(params.code_type)
     td.load_disk_cache(path, 150)
     png_path = path / 'tokens.png'
     token_distribution_plot(td, png_path)
-    #td.print_histogram()
 
+    log_path = path / params.log_file()
+    png_path = path / ('loss-%s.png' % params.to_string())
+    loss_plot(log_path, png_path)
 
 if __name__ == '__main__':
     main()

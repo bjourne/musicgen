@@ -1,48 +1,38 @@
+# Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
 from collections import Counter, namedtuple
-from musicgen.code_utils import (CODE_MIDI_MAPPING, INSN_PITCH)
+from musicgen.code_utils import CODE_MIDI_MAPPING, INSN_END
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_audio_file
 from musicgen.parser import UnsupportedModule, load_file
-from musicgen import pcode
-from musicgen.pcode import (mod_to_pcode,
-                            pcode_long_pause,
-                            pcode_short_pause,
-                            pcode_to_notes,
-                            is_pcode_learnable)
-from musicgen.scode import (mod_file_to_scode,
-                            scode_to_midi_file,
-                            scode_short_pause,
-                            scode_long_pause)
-from musicgen.utils import (SP, CharEncoder, file_name_for_params,
+from musicgen import pcode, scode
+from musicgen.pcode import mod_to_pcode, pcode_to_notes
+from musicgen.scode import mod_file_to_scode
+from musicgen.utils import (SP, CharEncoder,
+                            flatten, file_name_for_params,
                             load_pickle_cache, save_pickle)
 from random import shuffle
 import numpy as np
 
 CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_notes_fn',
-                                   'short_pause', 'long_pause',
-                                   'metadata_fn'])
+                                   'pause', 'metadata_fn'])
 
 # TODO: Fix scode
 CODE_TYPES = {
     'pcode_abs' : CodeInfo(lambda m: mod_to_pcode(m, False),
                            lambda c: pcode_to_notes(c, False),
-                           pcode_short_pause(),
-                           pcode_long_pause(),
+                           pcode.pause(),
                            pcode.metadata),
     'pcode_rel' : CodeInfo(lambda m: mod_to_pcode(m, True),
                            lambda c: pcode_to_notes(c, True),
-                           pcode_short_pause(),
-                           pcode_long_pause(),
-                           is_pcode_learnable),
+                           pcode.pause(),
+                           pcode.metadata),
     'scode_abs' : CodeInfo(lambda m: mod_file_to_scode(m, False),
                            None,
-                           scode_short_pause(),
-                           scode_long_pause(),
+                           scode.pause(),
                            None),
     'scode_rel' : CodeInfo(lambda m: mod_file_to_scode(m, True),
                            None,
-                           scode_short_pause(),
-                           scode_long_pause(),
+                           scode.pause(),
                            None)
 }
 
@@ -73,12 +63,11 @@ def mod_file_to_code_w_progress(i, n, file_path, info):
         SP.print('Unsupported module format.')
         SP.leave()
         return None
-    code = list(info.to_code_fn(mod))
+    code = list(info.to_code_fn(mod)) + [(INSN_END, 0)]
     meta = info.metadata_fn(code)
     if not is_learnable(meta):
         SP.leave()
         return None
-
     SP.leave()
     return code
 
@@ -98,9 +87,21 @@ def transpose_code(code):
         assert max(pitches) <= 35
     return codes
 
+def load_and_encode_mod_files(mod_files, info):
+    encoder = CharEncoder()
+    arrs = []
+    n = len(mod_files)
+    for i, p, in enumerate(sorted(mod_files)):
+        code = mod_file_to_code_w_progress(i + 1, n, p, info)
+        if not code:
+            continue
+        codes = transpose_code(code)
+        codes = [encoder.encode_chars(c, True) for c in codes]
+        arrs.append((p.name, codes))
+    return encoder, arrs
+
 def build_cache(path, shuffle_file, mods, info):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
-    n = len(mod_files)
 
     # Cache the shuffle to make trained models more comparable.
     shuffle_path = path / shuffle_file
@@ -109,16 +110,7 @@ def build_cache(path, shuffle_file, mods, info):
         shuffle(indices)
         return indices
     indices = load_pickle_cache(shuffle_path, rebuild_fn)
-
-    encoder = CharEncoder()
-    arrs = []
-    for i, p, in enumerate(sorted(mod_files)):
-        code = mod_file_to_code_w_progress(i + 1, n, p, info)
-        if not code:
-            continue
-        codes = transpose_code(code)
-        codes = [encoder.encode_chars(c, True) for c in codes]
-        arrs.append((p.name, codes))
+    encoder, arrs = load_and_encode_mod_files(mod_files, info)
 
     # Shuffle according to indices.
     tmp = [(i, e) for (i, e) in zip(indices, arrs)]
@@ -152,9 +144,8 @@ class TrainingData:
         self.encoder, self.arrs = data
 
     def load_mod_file(self, p):
-        code = mod_file_to_code_w_progress(1, 1, p, self.info.to_code_fn)
-        self.encoder = CharEncoder()
-        self.arrs = [(p.name, self.encoder.encode_chars(code, True))]
+        self.encoder, self.arrs = \
+            load_and_encode_mod_files([p], self.info)
 
     def split_3way(self, train_frac, valid_frac):
         n_mods = len(self.arrs)
@@ -179,26 +170,20 @@ class TrainingData:
             notes = self.info.to_notes_fn(code)
             notes_to_audio_file(notes, file_path, CODE_MIDI_MAPPING, True)
 
-    def flatten(self, add_pause):
-        pause = self.encoder.encode_chars(self.info.long_pause, False)
-        padded = []
-        SP.print('Flattening %d arrays.' % len(self.arrs))
-        for name, arr in self.arrs:
-            assert len(arr) > 0
-            for arr2 in arr:
-                padded.append(arr2)
-                if add_pause:
-                    padded.append(pause)
-        SP.print('Concatenating...')
-        return np.concatenate(padded)
+def flatten_training_data(td):
+    arrs = flatten([arrs for (_, arrs) in td.arrs])
 
-    def to_samples(self, length):
-        from musicgen.tensorflow import sequence_to_samples
-        seq = self.flatten(True)
-        return sequence_to_samples(seq, length)
+    # Temporary hack
+    end_idx = td.encoder.encode_char((INSN_END, 0), True)
+    end_arr = np.array([end_idx])
+    padded = []
+    for arr in arrs:
+        padded.append(arr)
+        padded.append(end_arr)
+    return np.concatenate(padded)
 
 def print_histogram(td):
-    seq = td.flatten(False)
+    seq = flatten_training_data(td)
     unique, counts = np.unique(seq, return_counts = True)
     ix_counts = dict(zip(unique, counts))
     ch_counts = {td.encoder.decode_char(ix) : cnt

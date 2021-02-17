@@ -15,7 +15,7 @@ class Sample:
             x_old = np.linspace(0, 1, arr.size)
             x_new = np.linspace(0, 1, n_samples)
             arr = np.interp(x_new, x_old, arr)
-        self.arr = arr.astype(np.float)
+        self.arr = arr.astype(float)
         if repeat_len > 1:
             self.repeat_from = round(2 * repeat_from * ratio)
             self.repeat_len = round(2 * repeat_len * ratio)

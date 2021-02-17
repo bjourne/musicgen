@@ -140,7 +140,7 @@ def main():
     model = compiled_model_from_params(path, params, vocab_size,
                                        n_preds, True)
     seq = data.flatten(True)
-    pause = encoder.encode_chars(data.info.long_pause, False).tolist()
+    pause = encoder.encode_chars(data.info.pause, False).tolist()
 
     # Select the seed
     if seed_idx != 'random':
@@ -154,9 +154,6 @@ def main():
             n_unique = len(set(seed_seq))
             if list(find_subseq(seed_seq, pause)):
                 SP.print('Pause in seed, regenerating.')
-                continue
-            if n_unique < 5:
-                SP.print('To few different tokens, regenerating.')
                 continue
             break
     SP.print('Seed %d+%d.' % (seed_idx, n_seed))

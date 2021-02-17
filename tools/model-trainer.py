@@ -26,14 +26,22 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
 from musicgen.params import ModelParams
-from musicgen.tensorflow import compiled_model_from_params
-from musicgen.training_data import load_training_data
+from musicgen.tensorflow import (compiled_model_from_params,
+                                 sequence_to_samples)
+from musicgen.training_data import (flatten_training_data,
+                                    load_training_data)
 from musicgen.utils import SP
 from pathlib import Path
 from tensorflow.keras.callbacks import *
 
 import numpy as np
 import tensorflow as tf
+
+def training_data_to_dataset(training_data, seq_len, batch_size):
+    seq = flatten_training_data(training_data)
+    dataset = sequence_to_samples(seq, seq_len)
+    dataset = dataset.batch(batch_size, drop_remainder = True)
+    return dataset
 
 def main():
     # Prologue
@@ -43,12 +51,14 @@ def main():
 
     # Hyperparameters
     params = ModelParams.from_docopt_args(args)
+    seq_len = params.seq_len
+    batch_size = params.batch_size
+
     train, valid, test = load_training_data(params.code_type, path)
+    vocab_size = len(train.encoder.ix2ch)
 
     args = len(train.arrs), len(valid.arrs), len(test.arrs)
     SP.print('Train/valid/test split %d/%d/%d' % args)
-
-    vocab_size = len(train.encoder.ix2ch)
 
     model = compiled_model_from_params(path, params, vocab_size,
                                        None, False)
@@ -73,12 +83,10 @@ def main():
         min_lr = params.lr / 100,
         verbose = 1)
     callbacks = [reduce_lr, cb_best, stopping, cb_epoch_end]
-    SP.print('Batching samples...')
-    train_ds = train.to_samples(params.seq_len) \
-        .batch(params.batch_size, drop_remainder = True)
-    valid_ds = valid.to_samples(params.seq_len) \
-        .batch(params.batch_size, drop_remainder = True)
 
+    SP.print('Batching samples...')
+    train_ds = training_data_to_dataset(train, seq_len, batch_size)
+    valid_ds = training_data_to_dataset(valid, seq_len, batch_size)
     model.fit(x = train_ds,
               validation_data = valid_ds,
               epochs = params.epochs, callbacks = callbacks,

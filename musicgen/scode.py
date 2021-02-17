@@ -19,10 +19,7 @@ import numpy as np
 MAX_COMPRESSED_SILENCE = 16
 ROW_TIME_FACTOR_MS = 240
 
-def scode_short_pause():
-    return [(INSN_SILENCE, 8)]
-
-def scode_long_pause():
+def pause():
     return [(INSN_SILENCE, 16)]
 
 def produce_silence(delta, compress_silence):

@@ -11,10 +11,7 @@ from musicgen.code_utils import (INSN_PITCH,
 from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
 from musicgen.utils import SP, sort_groupby
 
-def pcode_short_pause():
-    return [(INSN_SILENCE, 16)] * 2
-
-def pcode_long_pause():
+def pause():
     return [(INSN_SILENCE, 16)] * 8
 
 def pcode_to_notes(pcode, rel_pitches):
@@ -87,43 +84,6 @@ def metadata(pcode):
         hi = max(at, hi)
     meta['pitch_range'] = hi - lo
     return meta
-
-# Pretty weird code but it is isolated.
-def is_pcode_learnable(pcode):
-    n_toks = len(pcode)
-    if n_toks < 64:
-        SP.print('To few tokens, %d.' % n_toks)
-        return False
-
-    notes = [(c, a) for (c, a) in pcode if c != INSN_SILENCE]
-    n_notes = len(notes)
-    if n_notes < 16:
-        SP.print('To few notes, %d.' % n_notes)
-        return False
-    mel_notes_abs = [a for (c, a) in pcode if c == INSN_PITCH]
-    mel_notes_rel = [a for (c, a) in pcode if c == INSN_REL_PITCH]
-
-    rel_pitches = True if mel_notes_rel else False
-    mel_notes = mel_notes_rel if rel_pitches else mel_notes_abs
-
-    n_unique_notes = len(set(mel_notes))
-    if n_unique_notes < 4:
-        SP.print('To few unique melodic notes, %d.' % n_unique_notes)
-        return False
-    at = 0
-    lo, hi = 0, 0
-    for mel_note in mel_notes:
-        if rel_pitches:
-            at += mel_note
-        else:
-            at = mel_note
-        lo = min(at, lo)
-        hi = max(at, hi)
-    pitch_range = hi - lo
-    if pitch_range >= 36:
-        SP.print('Pitch range %d too large.' % pitch_range)
-        return False
-    return True
 
 def mod_to_pcode(mod, rel_pitches):
     rows = linearize_rows(mod)

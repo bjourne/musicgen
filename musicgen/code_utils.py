@@ -20,6 +20,7 @@ INSN_PITCH = 'P'
 INSN_REL_PITCH = 'R'
 INSN_SILENCE = 'S'
 INSN_DRUM = 'D'
+INSN_END = 'X'
 
 def insn_to_string(insn):
     cmd, arg = insn
