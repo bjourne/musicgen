@@ -1,7 +1,8 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
 #
 # PCode stands for parallel or polyphonic code.
-from musicgen.code_utils import (INSN_PITCH,
+from musicgen.code_utils import (BASE_ROW_TIME,
+                                 INSN_PITCH,
                                  INSN_REL_PITCH,
                                  INSN_SILENCE,
                                  INSN_DRUM,
@@ -14,7 +15,7 @@ from musicgen.utils import SP, sort_groupby
 def pause():
     return [(INSN_SILENCE, 16)] * 8
 
-def pcode_to_notes(pcode, rel_pitches):
+def to_notes(pcode, rel_pitches):
     if rel_pitches:
         at_pitch = guess_initial_pitch(pcode)
 
@@ -45,7 +46,7 @@ def pcode_to_notes(pcode, rel_pitches):
     # Guess and set row time
     row_indices = {n.row_idx for n in notes}
     max_row = max(row_indices)
-    row_time_ms = int(160 * len(row_indices) / max_row)
+    row_time_ms = int(BASE_ROW_TIME * len(row_indices) / max_row)
     for n in notes:
         n.time_ms = row_time_ms
 
@@ -85,7 +86,7 @@ def metadata(pcode):
     meta['pitch_range'] = hi - lo
     return meta
 
-def mod_to_pcode(mod, rel_pitches):
+def to_code(mod, rel_pitches):
     rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = rows_to_mod_notes(rows, volumes)
@@ -148,12 +149,11 @@ def mod_to_pcode(mod, rel_pitches):
 ########################################################################
 def test_encode_decode(mod_file, rel_pitches):
     from musicgen.code_utils import CODE_MIDI_MAPPING
-    from musicgen.generation import (notes_to_audio_file,
-                                     notes_to_midi_file)
+    from musicgen.generation import notes_to_midi_file
     from musicgen.parser import load_file
     mod = load_file(mod_file)
-    pcode = list(mod_to_pcode(mod, rel_pitches))
-    notes = pcode_to_notes(pcode, rel_pitches)
+    pcode = list(to_code(mod, rel_pitches))
+    notes = to_notes(pcode, rel_pitches)
     notes_to_midi_file(notes, 'test.mid', CODE_MIDI_MAPPING)
 
 if __name__ == '__main__':

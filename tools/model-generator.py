@@ -128,7 +128,7 @@ def main():
     path = Path(args['<corpus-path>'])
 
     params = ModelParams.from_docopt_args(args)
-    _, _, data = load_training_data(params.code_type, path)
+    _, _, td = load_training_data(params.code_type, path)
     temps = [0.90, 0.95, 1.0, 1.01, 1.02]
     top_ps = [0.87, 0.90, 0.94, 0.98, 0.99]
 
@@ -137,7 +137,7 @@ def main():
     n_preds = n_temps + n_top_ps
     n_samples = 1200
     n_seed = 256
-    enc = data.encoder
+    enc = td.encoder
     vocab_size = len(enc.ix2ch)
     seed_ix = args['--seed-idx']
     max_seq_len = int(args['--seq-len'])
@@ -147,7 +147,7 @@ def main():
 
     model = compiled_model_from_params(path, params, vocab_size,
                                        n_preds, True)
-    seq = flatten_training_data(data)
+    seq = flatten_training_data(td)
     end_ix = enc.encode_char((INSN_END, 0), True)
 
     n_frag = n_seed + n_samples
@@ -172,11 +172,11 @@ def main():
 
     seed = np.vstack((seed, seed[0]))
 
-    pause = enc.encode_chars(data.info.pause, False).tolist()
+    pause = enc.encode_chars(td.pause_code(), False).tolist()
     join = np.repeat(np.expand_dims(pause, 0), len(seqs), axis = 0)
     seqs = np.hstack((seed, join, seqs))
 
-    prefix = '%s-%s-%09d' % (data.code_type, mtype, seed_ix)
+    prefix = '%s-%s-%09d' % (td.code_type, mtype, seed_ix)
     file_names = ['%s-t%.3f' % (prefix, t) for t in temps]
     file_names += ['%s-p%.3f' % (prefix, p) for p in top_ps]
 
@@ -190,7 +190,7 @@ def main():
     for file_name, seq, log_prob in zip(file_names, seqs, log_probs):
         file_name = '%s-%04d.%s' % (file_name, -log_prob, file_format)
         file_path = base_path / file_name
-        data.save_code(seq, file_path)
+        td.save_code(seq, file_path)
 
 if __name__ == '__main__':
     main()

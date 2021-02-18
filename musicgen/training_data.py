@@ -1,40 +1,45 @@
 # Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
 from collections import Counter, namedtuple
-from musicgen.code_utils import CODE_MIDI_MAPPING, INSN_END
+from musicgen.code_utils import CODE_MIDI_MAPPING, INSN_END, INSN_PITCH
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_audio_file
 from musicgen.parser import UnsupportedModule, load_file
-from musicgen import pcode, scode
-from musicgen.pcode import mod_to_pcode, pcode_to_notes
-from musicgen.scode import mod_file_to_scode
+from musicgen import pcode_abs, pcode_rel, scode_abs, scode_rel
 from musicgen.utils import (SP, CharEncoder,
                             flatten, file_name_for_params,
                             load_pickle_cache, save_pickle)
 from random import randrange, shuffle
 import numpy as np
 
-CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_notes_fn',
-                                   'pause', 'metadata_fn'])
-
-# TODO: Fix scode
-CODE_TYPES = {
-    'pcode_abs' : CodeInfo(lambda m: mod_to_pcode(m, False),
-                           lambda c: pcode_to_notes(c, False),
-                           pcode.pause(),
-                           pcode.metadata),
-    'pcode_rel' : CodeInfo(lambda m: mod_to_pcode(m, True),
-                           lambda c: pcode_to_notes(c, True),
-                           pcode.pause(),
-                           pcode.metadata),
-    'scode_abs' : CodeInfo(lambda m: mod_file_to_scode(m, False),
-                           None,
-                           scode.pause(),
-                           None),
-    'scode_rel' : CodeInfo(lambda m: mod_file_to_scode(m, True),
-                           None,
-                           scode.pause(),
-                           None)
+CODE_MODULES = {
+    'pcode_abs' : pcode_abs,
+    'pcode_rel' : pcode_rel,
+    'scode_abs' : scode_abs,
+    'scode_rel' : scode_rel
 }
+
+# CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_notes_fn',
+#                                    'pause', 'metadata_fn'])
+
+# # TODO: Fix scode
+# CODE_TYPES = {
+#     'pcode_abs' : CodeInfo(lambda m: mod_to_pcode(m, False),
+#                            lambda c: pcode_to_notes(c, False),
+#                            pcode.pause(),
+#                            pcode.metadata),
+#     'pcode_rel' : CodeInfo(lambda m: mod_to_pcode(m, True),
+#                            lambda c: pcode_to_notes(c, True),
+#                            pcode.pause(),
+#                            pcode.metadata),
+#     'scode_abs' : CodeInfo(lambda m: mod_file_to_scode(m, False),
+#                            None,
+#                            scode.pause(),
+#                            None),
+#     'scode_rel' : CodeInfo(lambda m: mod_file_to_scode(m, True),
+#                            None,
+#                            scode.pause(),
+#                            None)
+# }
 
 def is_learnable(meta):
     n_toks = meta['n_toks']
@@ -55,7 +60,7 @@ def is_learnable(meta):
         return False
     return True
 
-def mod_file_to_code_w_progress(i, n, file_path, info):
+def mod_file_to_code_w_progress(i, n, file_path, code_type):
     SP.header('[ %4d / %4d ] PARSING %s' % (i, n, file_path))
     try:
         mod = load_file(file_path)
@@ -63,16 +68,17 @@ def mod_file_to_code_w_progress(i, n, file_path, info):
         SP.print('Unsupported module format.')
         SP.leave()
         return None
-    code = list(info.to_code_fn(mod)) + [(INSN_END, 0)]
-    meta = info.metadata_fn(code)
-    if not is_learnable(meta):
+
+    code_mod = CODE_MODULES[code_type]
+    code = list(code_mod.to_code(mod)) + [(INSN_END, 0)]
+    if not is_learnable(code_mod.metadata(code)):
         SP.leave()
         return None
     SP.leave()
     return code
 
 def transpose_code(code):
-    pitches = [p for (c, p) in code if c == 'P']
+    pitches = [p for (c, p) in code if c == INSN_PITCH]
 
     n_versions = 36 - max(pitches)
     assert n_versions > 0
@@ -82,25 +88,28 @@ def transpose_code(code):
               for (c, p) in code]
              for i in range(n_versions)]
     for i, code in enumerate(codes):
-        pitches = [p for (c, p) in code if c == 'P']
+        pitches = [p for (c, p) in code if c == INSN_PITCH]
         assert min(pitches) == i
         assert max(pitches) <= 35
     return codes
 
-def load_and_encode_mod_files(mod_files, info):
+def load_and_encode_mod_files(mod_files, code_type):
     encoder = CharEncoder()
     arrs = []
     n = len(mod_files)
     for i, p, in enumerate(sorted(mod_files)):
-        code = mod_file_to_code_w_progress(i + 1, n, p, info)
+        code = mod_file_to_code_w_progress(i + 1, n, p, code_type)
         if not code:
             continue
-        codes = transpose_code(code)
+        if CODE_MODULES[code_type].is_transposable():
+            codes = transpose_code(code)
+        else:
+            codes = [code]
         codes = [encoder.encode_chars(c, True) for c in codes]
         arrs.append((p.name, codes))
     return encoder, arrs
 
-def build_cache(path, shuffle_file, mods, info):
+def build_cache(path, shuffle_file, mods, code_type):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
 
     # Cache the shuffle to make trained models more comparable.
@@ -110,7 +119,7 @@ def build_cache(path, shuffle_file, mods, info):
         shuffle(indices)
         return indices
     indices = load_pickle_cache(shuffle_path, rebuild_fn)
-    encoder, arrs = load_and_encode_mod_files(mod_files, info)
+    encoder, arrs = load_and_encode_mod_files(mod_files, code_type)
 
     # Shuffle according to indices.
     tmp = [(i, e) for (i, e) in zip(indices, arrs)]
@@ -120,11 +129,13 @@ def build_cache(path, shuffle_file, mods, info):
 
 class TrainingData:
     def __init__(self, code_type):
-        if code_type not in CODE_TYPES:
-            s = ', '.join(CODE_TYPES)
+        if code_type not in CODE_MODULES:
+            s = ', '.join(CODE_MODULES)
             raise ValueError('<code-type> must be one of %s' % s)
         self.code_type = code_type
-        self.info = CODE_TYPES[code_type]
+
+    def pause_code(self):
+        return CODE_MODULES[self.code_type].pause()
 
     def load_disk_cache(self, path, kb_limit):
         index = load_index(path)
@@ -139,13 +150,13 @@ class TrainingData:
         cache_path = path / cache_file
         shuffle_file = file_name_for_params('shuffle', 'pickle', params)
         def rebuild_fn():
-            return build_cache(path, shuffle_file, mods, self.info)
+            return build_cache(path, shuffle_file, mods, self.code_type)
         data = load_pickle_cache(cache_path, rebuild_fn)
         self.encoder, self.arrs = data
 
     def load_mod_file(self, p):
         self.encoder, self.arrs = \
-            load_and_encode_mod_files([p], self.info)
+            load_and_encode_mod_files([p], self.code_type)
 
     def split_3way(self, train_frac, valid_frac):
         n_mods = len(self.arrs)
@@ -185,15 +196,15 @@ def flatten_training_data(td):
 def tally_tokens(td):
     seq = flatten_training_data(td)
     unique, counts = np.unique(seq, return_counts = True)
-    ix_counts = dict(zip(unique, counts))
-    return {td.encoder.decode_char(ix) : cnt
-            for (ix, cnt) in ix_counts.items()}
+    ch_counts = [(td.encoder.decode_char(ix), cnt) for (ix, cnt) in
+                 zip(unique, counts)]
+    return sorted(ch_counts)
 
 def print_histogram(td):
     counts = tally_tokens(td)
-    total = sum(counts.values())
+    total = sum(v for (_, v) in counts)
     SP.header('%d TOKENS %d TYPES' % (total, len(counts)))
-    for (cmd, arg), cnt in sorted(counts.items()):
+    for (cmd, arg), cnt in counts:
         SP.print('%s %3d %10d' % (cmd, arg, cnt))
     SP.leave()
 
@@ -224,4 +235,4 @@ if __name__ == '__main__':
     from pathlib import Path
     from sys import argv
     SP.enabled = True
-    load_training_data('pcode_abs', Path(argv[1]))
+    load_training_data('scode_rel', Path(argv[1]))

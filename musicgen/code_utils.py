@@ -1,4 +1,4 @@
-# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+# Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
 #
 # Utils common to all encodings.
 from musicgen.analyze import sample_props
@@ -8,12 +8,13 @@ from musicgen.analyze import sample_props
 #   27 (jazz guitar)
 #  105 (sitar)
 CODE_MIDI_MAPPING = {
-    1 : [-1, 44, 4, 1.0],
-    2 : [-1, 36, 4, 1.0],
+    1 : [-1, 36, 4, 1.0],
+    2 : [-1, 40, 4, 1.0],
     3 : [-1, 31, 4, 1.0],
-    4 : [3, 40, 3, 1.0]
+    4 : [1, 48, 4, 1.0]
     #4 : [1, 54, 3, 1.0]
 }
+BASE_ROW_TIME = 160
 
 # Standard instructions
 INSN_PITCH = 'P'

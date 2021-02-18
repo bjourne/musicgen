@@ -14,8 +14,8 @@ Options:
 from docopt import docopt
 from musicgen.code_utils import CODE_MIDI_MAPPING
 from musicgen.generation import notes_to_audio_file
-from musicgen.pcode import pcode_to_notes
 from musicgen.utils import SP, load_pickle
+from musicgen.training_data import CODE_MODULES
 from pathlib import Path
 
 def main():
@@ -28,9 +28,7 @@ def main():
     for file_path in file_paths:
         code_type = file_path.name.split('-')[0]
         obj = load_pickle(file_path)
-        if code_type == 'pcode_abs':
-            notes = pcode_to_notes(obj, False)
-
+        notes = CODE_MODULES[code_type].to_notes(obj)
         dir = file_path.parent
         stem = file_path.stem
         output_file = dir / (stem + '.mid')

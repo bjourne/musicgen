@@ -48,10 +48,13 @@ def test_transposing():
     td.load_mod_file(TEST_PATH / 'im_a_hedgehog.mod')
     assert not np.array_equal(td.arrs[0][1][0], td.arrs[0][1][1])
 
-def test_build_cache():
-    tmp_dir = Path(mkdtemp())
-    cat_dir = tmp_dir / 'category'
-    cat_dir.mkdir()
+TMP_DIR = Path('/tmp/cache_tmp')
+
+def maybe_build_index():
+    if TMP_DIR.exists():
+        return
+    cat_dir = TMP_DIR / 'category'
+    cat_dir.mkdir(exist_ok = True, parents = True)
     mods = [IndexedModule(p.name, i, 'MOD', 0, 4, 'category', 2000, 0,
                           0, 0)
             for i, p in enumerate(TEST_PATH.glob('*.mod'))]
@@ -60,11 +63,31 @@ def test_build_cache():
         dst = cat_dir / mod.fname
         copyfile(src, dst)
 
-    index = load_index(tmp_dir)
+    index = load_index(TMP_DIR)
     for mod in mods:
         index[mod.id] = mod
-    save_index(tmp_dir, index)
+    save_index(TMP_DIR, index)
 
+def test_code_types():
+    SP.enabled = True
+    maybe_build_index()
     td = TrainingData('pcode_abs')
-    td.load_disk_cache(tmp_dir, 150)
+    td.load_disk_cache(TMP_DIR, 150)
+    assert len(td.arrs) == 29
+
+    td = TrainingData('pcode_rel')
+    td.load_disk_cache(TMP_DIR, 150)
+    assert len(td.arrs) == 29
+    for name, arrs in td.arrs:
+        assert len(arrs) == 1
+
+    td = TrainingData('scode_abs')
+    td.load_disk_cache(TMP_DIR, 150)
+    assert len(td.arrs) == 29
+
+def test_scode_rel():
+    SP.enabled = True
+    maybe_build_index()
+    td = TrainingData('scode_rel')
+    td.load_disk_cache(TMP_DIR, 150)
     assert len(td.arrs) == 29

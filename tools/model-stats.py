@@ -54,17 +54,12 @@ def token_distribution_plot(td, png_path):
     tot = sum(values)
     values = [v / tot for v in values]
 
+    type_colors = {'D' : 'C0', 'P' : 'C1', 'S' : 'C2', 'X' : 'C3'}
+
     fig, ax = plt.subplots(figsize = (12, 6))
     bars = ax.bar(np.arange(len(values)), values, width = 0.80)
     for bar, name in zip(bars, names):
-        if name[0] == 'D':
-            bar.set_color('C0')
-        elif name[0] == 'P':
-            bar.set_color('C1')
-        else:
-            bar.set_color('C2')
-
-    #ax.set_yticks([])
+        bar.set_color(type_colors[name[0]])
     ax.set_xticks(range(0, len(values)))
     ax.set_xticklabels(names, rotation = 45,
                        rotation_mode = 'anchor',
