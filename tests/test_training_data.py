@@ -1,5 +1,6 @@
 # Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
 from musicgen.code_utils import INSN_END
+from musicgen.corpus import IndexedModule, load_index, save_index
 from musicgen.training_data import (TrainingData,
                                     flatten_training_data,
                                     load_training_data,
@@ -7,8 +8,10 @@ from musicgen.training_data import (TrainingData,
                                     print_histogram)
 from musicgen.utils import SP
 from pathlib import Path
-import numpy as np
+from shutil import copyfile
+from tempfile import mkdtemp
 
+import numpy as np
 
 TEST_PATH = Path() / 'tests' / 'mods'
 
@@ -44,3 +47,24 @@ def test_transposing():
     td = TrainingData('pcode_abs')
     td.load_mod_file(TEST_PATH / 'im_a_hedgehog.mod')
     assert not np.array_equal(td.arrs[0][1][0], td.arrs[0][1][1])
+
+def test_build_cache():
+    tmp_dir = Path(mkdtemp())
+    cat_dir = tmp_dir / 'category'
+    cat_dir.mkdir()
+    mods = [IndexedModule(p.name, i, 'MOD', 0, 4, 'category', 2000, 0,
+                          0, 0)
+            for i, p in enumerate(TEST_PATH.glob('*.mod'))]
+    for mod in mods:
+        src = TEST_PATH / mod.fname
+        dst = cat_dir / mod.fname
+        copyfile(src, dst)
+
+    index = load_index(tmp_dir)
+    for mod in mods:
+        index[mod.id] = mod
+    save_index(tmp_dir, index)
+
+    td = TrainingData('pcode_abs')
+    td.load_disk_cache(tmp_dir, 150)
+    assert len(td.arrs) == 29

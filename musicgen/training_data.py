@@ -106,7 +106,7 @@ def build_cache(path, shuffle_file, mods, info):
     # Cache the shuffle to make trained models more comparable.
     shuffle_path = path / shuffle_file
     def rebuild_fn():
-        indices = list(range(n))
+        indices = list(range(len(mods)))
         shuffle(indices)
         return indices
     indices = load_pickle_cache(shuffle_path, rebuild_fn)
@@ -182,15 +182,18 @@ def flatten_training_data(td):
         padded.append(end_arr)
     return np.concatenate(padded)
 
-def print_histogram(td):
+def tally_tokens(td):
     seq = flatten_training_data(td)
     unique, counts = np.unique(seq, return_counts = True)
     ix_counts = dict(zip(unique, counts))
-    ch_counts = {td.encoder.decode_char(ix) : cnt
-                 for (ix, cnt) in ix_counts.items()}
-    total = sum(ch_counts.values())
-    SP.header('%d TOKENS %d TYPES' % (total, len(ch_counts)))
-    for (cmd, arg), cnt in sorted(ch_counts.items()):
+    return {td.encoder.decode_char(ix) : cnt
+            for (ix, cnt) in ix_counts.items()}
+
+def print_histogram(td):
+    counts = tally_tokens(td)
+    total = sum(counts.values())
+    SP.header('%d TOKENS %d TYPES' % (total, len(counts)))
+    for (cmd, arg), cnt in sorted(counts.items()):
         SP.print('%s %3d %10d' % (cmd, arg, cnt))
     SP.leave()
 

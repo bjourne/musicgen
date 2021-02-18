@@ -23,7 +23,8 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
 from musicgen.params import ModelParams
-from musicgen.training_data import TrainingData
+from musicgen.training_data import (TrainingData, load_training_data,
+                                    tally_tokens)
 from musicgen.utils import SP
 from pathlib import Path
 
@@ -46,13 +47,9 @@ def loss_plot(log_file, png_path):
     fig.savefig(png_path)
 
 def token_distribution_plot(td, png_path):
-    seq = td.flatten(False)
-    unique, counts = np.unique(seq, return_counts = True)
-    ix_counts = zip(unique, counts)
-    ch_counts = sorted([(td.encoder.decode_char(ix), cnt)
-                        for (ix, cnt) in ix_counts])
-    names = ['%s%s' % ch for (ch, _) in ch_counts]
-    values = [v for (_, v) in ch_counts]
+    counts = tally_tokens(td)
+    names = ['%s%s' % ch for (ch, _) in counts]
+    values = [v for (_, v) in counts]
 
     tot = sum(values)
     values = [v / tot for v in values]
@@ -72,7 +69,6 @@ def token_distribution_plot(td, png_path):
     ax.set_xticklabels(names, rotation = 45,
                        rotation_mode = 'anchor',
                        ha = 'right')
-    #title = "Dataset's token distribution (n = {:,})".format(tot)
     tot_fmt = '{:,}'.format(sum(values))
     ax.set(xlabel = 'token', ylabel = 'freq.') #, title = title)
     ax.grid()
@@ -91,6 +87,7 @@ def main():
 
     td = TrainingData(params.code_type)
     td.load_disk_cache(path, 150)
+
     png_path = path / 'tokens.png'
     token_distribution_plot(td, png_path)
 
