@@ -37,6 +37,5 @@ def main():
         SP.print('Creating %s.' %  output_file)
         notes_to_audio_file(notes, output_file, CODE_MIDI_MAPPING, False)
 
-
 if __name__ == '__main__':
     main()

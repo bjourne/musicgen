@@ -10,7 +10,7 @@ from musicgen.scode import mod_file_to_scode
 from musicgen.utils import (SP, CharEncoder,
                             flatten, file_name_for_params,
                             load_pickle_cache, save_pickle)
-from random import shuffle
+from random import randrange, shuffle
 import numpy as np
 
 CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_notes_fn',
@@ -204,6 +204,18 @@ def load_training_data(code_type, path):
         train = valid = test = td
     print_histogram(td)
     return train, valid, test
+
+def pick_song_fragment(seq, i, n, end_ix):
+    if i != 'random':
+        i = int(i)
+        return i, seq[i:i + n]
+    while True:
+        i = randrange(len(seq) - n)
+        fragment = seq[i:i + n]
+        if end_ix in fragment:
+            SP.print('EOS in fragment, regenerating.')
+            continue
+        return i, fragment
 
 if __name__ == '__main__':
     from pathlib import Path

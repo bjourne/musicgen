@@ -24,10 +24,13 @@ Options:
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from docopt import docopt
+from musicgen.code_utils import INSN_END
 from musicgen.params import ModelParams
 from musicgen.tensorflow import (compiled_model_from_params,
                                  select_strategy)
-from musicgen.training_data import load_training_data
+from musicgen.training_data import (flatten_training_data,
+                                    load_training_data,
+                                    pick_song_fragment)
 from musicgen.utils import SP, find_subseq
 from pathlib import Path
 from random import randrange
@@ -49,7 +52,8 @@ def top_p_skew(P, top_p):
     P[prob_ixs[top_n:]] = 0.0
     return P / P.sum()
 
-def lstm_continuation(model, temps, top_ps, seed, n_samples, max_seq_len):
+def lstm_continuation(model, temps, top_ps, seed,
+                      n_samples, max_seq_len, end_ix):
 
     SP.print('Priming the model with %d tokens.' % seed.shape[1])
     for i in trange(seed.shape[1] - 1):
@@ -60,12 +64,16 @@ def lstm_continuation(model, temps, top_ps, seed, n_samples, max_seq_len):
     n_top_ps = len(top_ps)
     n_preds = n_temps + n_top_ps
     log_probs = [0] * n_preds
+    eps = np.finfo('float').eps
 
     SP.print('Predicting %d tokens.' % n_samples)
     for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
         last_word = preds[-1]
         logits = model.predict(last_word)[:, 0, :]
         Ps = softmax(logits).numpy()
+
+        # Dont sample end tokens
+        Ps[:, end_ix] = eps
 
         for i in range(n_temps):
             Ps[i] = temperature_skew(Ps[i], temps[i])
@@ -92,7 +100,7 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples,
     preds = []
     SP.print('Predicting %d tokens.' % n_samples)
     for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
-        y = model(seed)
+        y = model(seed, training = False)
         Ps = y[:, -1, :]
         Ps = softmax(Ps).numpy()
         for i in range(n_temps):
@@ -129,9 +137,9 @@ def main():
     n_preds = n_temps + n_top_ps
     n_samples = 1200
     n_seed = 256
-    encoder = data.encoder
-    vocab_size = len(encoder.ix2ch)
-    seed_idx = args['--seed-idx']
+    enc = data.encoder
+    vocab_size = len(enc.ix2ch)
+    seed_ix = args['--seed-idx']
     max_seq_len = int(args['--seq-len'])
     file_format = args['--file-format']
 
@@ -139,24 +147,14 @@ def main():
 
     model = compiled_model_from_params(path, params, vocab_size,
                                        n_preds, True)
-    seq = data.flatten(True)
-    pause = encoder.encode_chars(data.info.pause, False).tolist()
+    seq = flatten_training_data(data)
+    end_ix = enc.encode_char((INSN_END, 0), True)
 
-    # Select the seed
-    if seed_idx != 'random':
-        seed_idx = int(seed_idx)
-        seed = seq[seed_idx:seed_idx + n_seed]
-    else:
-        while True:
-            seed_idx  = randrange(len(seq) - n_seed - n_samples)
-            seed = seq[seed_idx:seed_idx + n_seed]
-            seed_seq = seed.tolist()
-            n_unique = len(set(seed_seq))
-            if list(find_subseq(seed_seq, pause)):
-                SP.print('Pause in seed, regenerating.')
-                continue
-            break
-    SP.print('Seed %d+%d.' % (seed_idx, n_seed))
+    n_frag = n_seed + n_samples
+    seed_ix, frag = pick_song_fragment(seq, seed_ix, n_frag, end_ix)
+    SP.print('Seed %d+%d.' % (seed_ix, n_seed))
+
+    seed = seq[seed_ix:seed_ix + n_seed]
     seed = np.repeat(np.expand_dims(seed, 0), n_preds, axis = 0)
 
     mtype = params.model_type
@@ -166,18 +164,19 @@ def main():
         cont_fn = lstm_continuation
 
     seqs, log_probs = cont_fn(model, temps, top_ps, seed, n_samples,
-                              max_seq_len)
+                              max_seq_len, end_ix)
 
     # Add the original
-    orig = seq[seed_idx + n_seed:seed_idx + n_seed + n_samples]
+    orig = seq[seed_ix + n_seed:seed_ix + n_frag]
     seqs = np.vstack((seqs, orig))
 
     seed = np.vstack((seed, seed[0]))
 
+    pause = enc.encode_chars(data.info.pause, False).tolist()
     join = np.repeat(np.expand_dims(pause, 0), len(seqs), axis = 0)
     seqs = np.hstack((seed, join, seqs))
 
-    prefix = '%s-%s-%09d' % (data.code_type, mtype, seed_idx)
+    prefix = '%s-%s-%09d' % (data.code_type, mtype, seed_ix)
     file_names = ['%s-t%.3f' % (prefix, t) for t in temps]
     file_names += ['%s-p%.3f' % (prefix, p) for p in top_ps]
 
