@@ -25,10 +25,10 @@ def linearize_rows(mod):
                 arg1 = cell.effect_arg1
                 arg2 = cell.effect_arg2
                 if cmd == 0xb and not jump_loc in jumps_taken:
-                        table_idx = 16 * arg1 + arg2 - 1
-                        jumps_taken.add(jump_loc)
-                        next_from = 0
-                        jump = True
+                    table_idx = 16 * arg1 + arg2 - 1
+                    jumps_taken.add(jump_loc)
+                    next_from = 0
+                    jump = True
                 elif cmd == 0xd:
                     next_from = 10 * arg1 + arg2
                     jump = True
