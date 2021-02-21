@@ -151,6 +151,7 @@ def sample_props(mod, notes):
 def main():
     from argparse import ArgumentParser, FileType
     from musicgen.parser import load_file
+    from musicgen.rows import linearize_subsongs, rows_to_mod_notes
     from termtables import print as tt_print
     from termtables.styles import ascii_booktabs, booktabs
 
@@ -161,13 +162,13 @@ def main():
     args.module.close()
 
     mod = load_file(args.module.name)
-    print(mod.title)
-    rows = linearize_rows(mod)
-    notes = list(notes_in_rows(mod, rows))
+    rows = list(linearize_subsongs(mod, 1))[0][1]
+    volumes = [header.volume for header in mod.sample_headers]
+    notes = rows_to_mod_notes(rows, volumes)
     props = sample_props(mod, notes)
 
     # Make a table
-    rows = [(sample,) + p for (sample, p) in props]
+    rows = [(sample,) + p for (sample, p) in props.items()]
     rows = [[fmt % col for (col, fmt) in zip(row, ROW_FORMAT)]
             for row in rows]
     tt_print(rows,
