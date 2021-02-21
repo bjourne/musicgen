@@ -153,7 +153,7 @@ def test_encode_decode(mod_file, rel_pitches):
         pitches = {n.pitch_idx for n in notes
                    if n.sample_idx not in percussion}
         min_pitch = min(pitches, default = 0)
-        code = to_code2(notes, rel_pitches, percussion, min_pitch)
+        code = to_code(notes, rel_pitches, percussion, min_pitch)
         notes = to_notes(code, rel_pitches)
         fname = 'test-%02d.mid' % idx
         notes_to_midi_file(notes, fname, CODE_MIDI_MAPPING)

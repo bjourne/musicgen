@@ -53,39 +53,6 @@ def linearize_subsongs(mod, n_allowed_jumps):
     if play_order:
         yield play_order, rows
 
-def linearize_rows(mod):
-    table_idx = 0
-    rows = []
-    jumps_taken = set()
-    next_from = 0
-    while table_idx < mod.n_orders:
-        pattern_idx = mod.pattern_table[table_idx]
-        pattern = mod.patterns[pattern_idx]
-        assert len(pattern.rows) == 64
-        for i in range(next_from, 64):
-            row = pattern.rows[i]
-            rows.append(row)
-            jump = False
-            jump_loc = table_idx, i
-            for cell in row:
-                cmd = cell.effect_cmd
-                arg1 = cell.effect_arg1
-                arg2 = cell.effect_arg2
-                if cmd == 0xb and not jump_loc in jumps_taken:
-                    table_idx = 16 * arg1 + arg2 - 1
-                    jumps_taken.add(jump_loc)
-                    next_from = 0
-                    jump = True
-                elif cmd == 0xd:
-                    next_from = 10 * arg1 + arg2
-                    jump = True
-            if jump:
-                break
-            else:
-                next_from = 0
-        table_idx += 1
-    return rows
-
 def update_timings(row, tempo, speed):
     for cell in row:
         if cell.effect_cmd == EFFECT_CMD_UPDATE_TIMING:

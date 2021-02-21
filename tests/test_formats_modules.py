@@ -42,7 +42,6 @@ def test_loading_truncated_module():
 def percussive_samples(mod):
     subsongs = linearize_subsongs(mod, 1)
     rows = flatten(r for (_, r) in subsongs)
-    # rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = list(rows_to_mod_notes(rows, volumes))
     return {sample for (sample, p) in sample_props(mod, notes).items()

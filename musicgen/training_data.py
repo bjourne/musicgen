@@ -47,12 +47,15 @@ def mod_file_to_codes_w_progress(i, n, file_path, code_type):
     except UnsupportedModule:
         SP.print('Unsupported module format.')
         SP.leave()
+        return
     code_mod = CODE_MODULES[code_type]
 
     subsongs = list(linearize_subsongs(mod, 1))
     volumes = [header.volume for header in mod.sample_headers]
-    for idx, (_, rows) in enumerate(subsongs):
+    for idx, (order, rows) in enumerate(subsongs):
         SP.header('SUBSONG %d' % idx)
+        SP.print('Table order: %s' % order)
+
         notes = rows_to_mod_notes(rows, volumes)
         percussion = guess_percussive_instruments(mod, notes)
         if notes:
@@ -80,28 +83,31 @@ def load_and_encode_mod_files(mod_files, code_type):
     encoder = CharEncoder()
     arrs = []
     n = len(mod_files)
-    ending = [(INSN_END, 0)]
+    end_tok = (INSN_END, 0)
     for i, p, in enumerate(sorted(mod_files)):
         codes = list(mod_file_to_codes_w_progress(i + 1, n, p, code_type))
         if not codes:
             continue
-        # Add ending
-        codes = [code + ending for code in codes]
+        # Encode and add ending
+        codes = [c + [end_tok] for c in codes]
         codes = [encoder.encode_chars(c, True) for c in codes]
         arrs.append((p.name, codes))
     return encoder, arrs
 
 def build_cache(path, shuffle_file, mods, code_type):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
+    encoder, arrs = load_and_encode_mod_files(mod_files, code_type)
 
-    # Cache the shuffle to make trained models more comparable.
+    # Cache the shuffle so that the train-validation split is the same
+    # no matter the code type.
     shuffle_path = path / shuffle_file
     def rebuild_fn():
-        indices = list(range(len(mods)))
+        n = len(arrs)
+        SP.print('Shuffling %d mods.' % n)
+        indices = list(range(n))
         shuffle(indices)
         return indices
     indices = load_pickle_cache(shuffle_path, rebuild_fn)
-    encoder, arrs = load_and_encode_mod_files(mod_files, code_type)
 
     # Shuffle according to indices.
     tmp = [(i, e) for (i, e) in zip(indices, arrs)]
@@ -160,20 +166,12 @@ class TrainingData:
         if file_path.suffix == '.pickle':
             save_pickle(file_path, code)
         else:
-            notes = self.info.to_notes_fn(code)
+            notes = CODE_MODULES[self.code_type].to_notes(code)
             notes_to_audio_file(notes, file_path, CODE_MIDI_MAPPING, True)
 
 def flatten_training_data(td):
     arrs = flatten([arrs for (_, arrs) in td.arrs])
-
-    # Temporary hack
-    end_idx = td.encoder.encode_char((INSN_END, 0), True)
-    end_arr = np.array([end_idx])
-    padded = []
-    for arr in arrs:
-        padded.append(arr)
-        padded.append(end_arr)
-    return np.concatenate(padded)
+    return np.concatenate(arrs)
 
 def tally_tokens(td):
     seq = flatten_training_data(td)
@@ -217,4 +215,10 @@ if __name__ == '__main__':
     from pathlib import Path
     from sys import argv
     SP.enabled = True
-    load_training_data('scode_rel', Path(argv[1]))
+    _, _, td = load_training_data('pcode_abs', Path(argv[1]))
+    end_idx = td.encoder.encode_char((INSN_END, 0), True)
+    seq = flatten_training_data(td)
+    for i in range(10):
+        ofs, frag = pick_song_fragment(seq, 'random', 1500, end_idx)
+        SP.print('Picked fragment %d+%d.' % (ofs, len(frag)))
+        td.save_code(frag, Path('test-%02d.mid' % i))

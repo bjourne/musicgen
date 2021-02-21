@@ -10,7 +10,7 @@ from musicgen.code_utils import (CODE_MIDI_MAPPING,
                                  guess_initial_pitch,
                                  guess_percussive_instruments)
 from musicgen.generation import notes_to_midi_file
-from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
+from musicgen.rows import ModNote, rows_to_mod_notes
 from musicgen.utils import SP, flatten
 from random import shuffle
 import numpy as np

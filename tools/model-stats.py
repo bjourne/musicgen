@@ -23,8 +23,7 @@ environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
 from musicgen.params import ModelParams
-from musicgen.training_data import (TrainingData, load_training_data,
-                                    tally_tokens)
+from musicgen.training_data import TrainingData, tally_tokens
 from musicgen.utils import SP
 from pathlib import Path
 
@@ -52,6 +51,7 @@ def token_distribution_plot(td, png_path):
     values = [v for (_, v) in counts]
 
     tot = sum(values)
+    print('tot', tot)
     values = [v / tot for v in values]
 
     type_colors = {'D' : 'C0', 'P' : 'C1', 'S' : 'C2', 'X' : 'C3'}
@@ -68,8 +68,6 @@ def token_distribution_plot(td, png_path):
     ax.set(xlabel = 'token', ylabel = 'freq.') #, title = title)
     ax.grid()
     fig.savefig(png_path)
-
-    print(names)
 
 def main():
     # Prologue
