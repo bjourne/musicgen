@@ -1,10 +1,57 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+from collections import defaultdict
 from musicgen.defs import (DEFAULT_SPEED, DEFAULT_TEMPO,
                            EFFECT_CMD_UPDATE_TIMING,
                            EFFECT_CMD_SET_VOLUME,
                            Note,
                            period_to_idx)
 from musicgen.utils import SP, flatten
+
+def linearize_subsongs(mod, n_allowed_jumps):
+    jump_counts = defaultdict(int)
+    table_idx = 0
+    next_from = 0
+    play_order = []
+    rows = []
+
+    # Used orders pevents subsongs from looping into each other.
+    used_orders = set()
+    while table_idx < mod.n_orders:
+        play_order.append(table_idx)
+        pattern_idx = mod.pattern_table[table_idx]
+        pattern = mod.patterns[pattern_idx]
+        for i in range(next_from, 64):
+            row = pattern.rows[i]
+            rows.append(row)
+            jump = False
+            for cell in row:
+                cmd = cell.effect_cmd
+                arg1 = cell.effect_arg1
+                arg2 = cell.effect_arg2
+                if cmd == 0xb:
+                    loc = table_idx, i
+                    target_idx = 16 * arg1 + arg2
+                    jump_count = jump_counts[loc]
+                    if (jump_count < n_allowed_jumps and
+                        target_idx not in used_orders):
+                        jump_counts[loc] += 1
+                        table_idx = target_idx - 1
+                        next_from = 0
+                        jump = True
+                    else:
+                        used_orders.update(play_order)
+                        yield play_order, rows
+                        play_order, rows = [], []
+                elif cmd == 0xd:
+                    next_from = 10 * arg1 + arg2
+                    jump = True
+            if jump:
+                break
+            else:
+                next_from = 0
+        table_idx += 1
+    if play_order:
+        yield play_order, rows
 
 def linearize_rows(mod):
     table_idx = 0
@@ -149,3 +196,10 @@ def column_to_mod_notes(rows, col_idx, volumes):
 def rows_to_mod_notes(rows, volumes):
     return flatten([column_to_mod_notes(rows, i, volumes)
                     for i in range(4)])
+
+if __name__ == '__main__':
+    from sys import argv
+    from musicgen.parser import load_file
+    mod = load_file(argv[1])
+    for play_order, rows in linearize_subsongs(mod, 1):
+        print(play_order)

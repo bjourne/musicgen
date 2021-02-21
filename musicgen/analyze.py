@@ -2,7 +2,7 @@
 from collections import Counter, defaultdict, namedtuple
 from itertools import groupby
 from musicgen.defs import AMIGA_SAMPLE_RATE, BASE_FREQ, FREQS
-from musicgen.utils import sort_groupby
+from musicgen.utils import SP, sort_groupby
 
 HEADER = [
     'Sample',
@@ -46,9 +46,40 @@ def bin_duration(dist):
             return thr
     return 1
 
+def is_percussive(n_pitches, n_unique, n_pitch_classes,
+                  max_ringout, repeat_pct,
+                  longest_rep, most_common_freq):
+    if n_unique <= 2 and max_ringout <= 0.15:
+        return True
+
+    # Sample is not repeating
+    if repeat_pct == 1.0:
+        # Always percussive if only one note is played.
+        if n_unique == 1:
+            return True
+
+        if most_common_freq > 0.9 and n_unique <= 2 and max_ringout < 0.6:
+            return True
+
+        # If the same note is repeated more than 40 times, it must be
+        # percussive. This is ofc completely arbitrary.
+        if longest_rep >= 40:
+            return True
+        # Another arbitrary one.
+        if n_unique == 3 and max_ringout <= 0.11 and longest_rep >= 23:
+            return True
+
+        # I'm not sure if this is a good idea or not.
+        if n_unique == 2 and n_pitch_classes <= 1:
+            SP.print('PITCH CLASS THING %s' % n_pitches)
+            return True
+    return False
+
+
 def get_sample_props(mod, sample_idx, notes):
     # Get all piches
     pitches = [n.pitch_idx for n in notes]
+    n_pitches = len(pitches)
 
     # Homogenize durations
     durations = [bin_duration(n.row_duration) for n in notes]
@@ -75,27 +106,15 @@ def get_sample_props(mod, sample_idx, notes):
     # Compute average ringout
     max_ringout = max(n.ringout_duration for n in notes)
 
+    # Pitch classes
+    n_pitch_classes = len({p % 12 for p in counter})
+
     # Guess whether the sample is for a percussive instrument.
-    is_percussive = False
-
-    if n_unique <= 2 and max_ringout <= 0.15:
-        is_percussive = True
-
-    # Sample is not repeating
-    if repeat_pct == 1.0:
-        # Always percussive if only one note is played.
-        if n_unique == 1:
-            is_percussive = True
-        if most_common_freq > 0.9 and n_unique <= 2:
-            if max_ringout < 0.6:
-                is_percussive = True
-        # If the same note is repeated more than 40 times, it must be
-        # percussive. This is ofc completely arbitrary.
-        if longest_rep >= 40:
-            is_percussive = True
-        # Another arbitrary one.
-        if n_unique == 3 and max_ringout <= 0.11 and longest_rep >= 23:
-            is_percussive = True
+    # SP.print(sample_idx)
+    is_perc = is_percussive(n_pitches, n_unique, n_pitch_classes,
+                            max_ringout, repeat_pct,
+                            longest_rep,
+                            most_common_freq)
 
     return SampleProps(most_common_freq,
                        len(notes),
@@ -105,7 +124,7 @@ def get_sample_props(mod, sample_idx, notes):
                        base_duration,
                        repeat_pct,
                        max_ringout,
-                       is_percussive)
+                       is_perc)
 
 AnalyzeNote = namedtuple('AnalyzeNote', [
     'sample_idx', 'pitch_idx', 'row_duration', 'ringout_duration'])

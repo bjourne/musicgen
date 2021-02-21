@@ -91,3 +91,10 @@ def test_scode_rel():
     td = TrainingData('scode_rel')
     td.load_disk_cache(TMP_DIR, 150)
     assert len(td.arrs) == 29
+
+def test_dcode():
+    SP.enabled = True
+    maybe_build_index()
+    td = TrainingData('dcode')
+    td.load_disk_cache(TMP_DIR, 150)
+    assert len(td.arrs) == 29

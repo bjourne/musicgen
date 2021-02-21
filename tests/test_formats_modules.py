@@ -2,8 +2,9 @@ from musicgen.analyze import sample_props
 from musicgen.defs import PERIODS, period_to_idx
 from musicgen.parser import load_file
 from musicgen.prettyprint import rows_to_string
-from musicgen.rows import linearize_rows, rows_to_mod_notes
+from musicgen.rows import linearize_subsongs, rows_to_mod_notes
 from musicgen.samples import load_samples
+from musicgen.utils import flatten
 from pathlib import Path
 
 TEST_PATH = Path() / 'tests' / 'mods'
@@ -19,11 +20,6 @@ def test_load_samples():
     mod = load_file(TEST_PATH / 'entity.mod')
     samples = load_samples(mod)
     assert samples[13].repeat_len == 0
-
-def test_pattern_jump():
-    mod = load_file(TEST_PATH / 'wax-rmx.mod')
-    rows = linearize_rows(mod)
-    assert len(rows) == 2640
 
 def test_load_stk_module():
     mod = load_file(TEST_PATH / '3ddance.mod')
@@ -44,7 +40,9 @@ def test_loading_truncated_module():
     assert len(mod.samples[8].bytes) == 7990
 
 def percussive_samples(mod):
-    rows = linearize_rows(mod)
+    subsongs = linearize_subsongs(mod, 1)
+    rows = flatten(r for (_, r) in subsongs)
+    # rows = linearize_rows(mod)
     volumes = [header.volume for header in mod.sample_headers]
     notes = list(rows_to_mod_notes(rows, volumes))
     return {sample for (sample, p) in sample_props(mod, notes).items()
