@@ -2,6 +2,7 @@
 #
 # Utils common to all encodings.
 from musicgen.analyze import sample_props
+from musicgen.utils import SP
 
 # Fun melodic instruments:
 #   20 (organ)
@@ -63,3 +64,18 @@ def fix_durations(notes):
         last_note = notes[-1]
         row_in_page = last_note.row_idx % 64
         last_note.duration = min(64 - row_in_page, 16)
+
+def transpose_code(code):
+    pitches = [p for (c, p) in code if c == INSN_PITCH]
+
+    n_versions = 36 - max(pitches)
+    assert n_versions > 0
+
+    codes = [[(c, p) if c != 'P' else (c, p + i)
+              for (c, p) in code]
+             for i in range(n_versions)]
+    for i, code in enumerate(codes):
+        pitches = [p for (c, p) in code if c == INSN_PITCH]
+        assert min(pitches) == i
+        assert max(pitches) <= 35
+    return codes

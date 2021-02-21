@@ -146,7 +146,7 @@ def split_heads(inp, n_heads, depth, batch_size):
     return tf.transpose(inp, perm = [0, 2, 1, 3])
 
 def transformer(vocab_size, d_model, ffn_units, dropout,
-                n_layers, n_heads, seq_len):
+                n_layers, n_heads, seq_len, is_training):
     # Input and look-ahead mask
     inp = Input(shape = (None,))
 
@@ -173,7 +173,8 @@ def transformer(vocab_size, d_model, ffn_units, dropout,
     batch_size = tf.shape(x)[0]
 
     # Idk why this doesn't work.
-    #seq_len = tf.shape(x)[1]
+    if not is_training:
+        seq_len = tf.shape(x)[1]
 
     mask = 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
 
@@ -414,13 +415,13 @@ class GPT2(Model):
 # trained with.
 
 def compiled_model_from_params(path, params, vocab_size,
-                               batch_size, stateful):
+                               batch_size, is_training):
     mtype = params.model_type
     strategy = select_strategy()
     if mtype == 'transformer':
         with strategy.scope():
             model = transformer(vocab_size, 128, 2048, 0.2, 8, 16,
-                                params.seq_len)
+                                params.seq_len, is_training)
             opt = RMSprop(learning_rate = params.lr)
     elif mtype == 'gpt2':
         with strategy.scope():
@@ -429,13 +430,13 @@ def compiled_model_from_params(path, params, vocab_size,
             opt = Adam(learning_rate=params.lr, epsilon=1e-08)
     else:
         opt = RMSprop(learning_rate = params.lr)
-        if stateful:
+        if not is_training:
             model = lstm_model(vocab_size,
                                params.type_params.emb_size,
                                params.type_params.lstm1_units,
                                params.type_params.lstm2_units,
                                0.0, 0.0,
-                               stateful, batch_size)
+                               not is_training, batch_size)
         else:
             with strategy.scope():
                 model = lstm_model(vocab_size,
@@ -444,9 +445,9 @@ def compiled_model_from_params(path, params, vocab_size,
                                    params.type_params.lstm2_units,
                                    params.type_params.dropout,
                                    params.type_params.rec_dropout,
-                                   stateful, batch_size)
+                                   not is_training, batch_size)
 
-    if mtype in ('transformer', 'gpt2') or not stateful:
+    if mtype in ('transformer', 'gpt2') or is_training:
         with strategy.scope():
             loss_fn = SparseCategoricalCrossentropy(from_logits = True)
             metrics = ['sparse_categorical_accuracy']
@@ -460,7 +461,7 @@ def compiled_model_from_params(path, params, vocab_size,
         model.load_weights(str(weights_path))
     else:
         SP.print('Weights file %s not found.' % weights_path)
-    if stateful:
+    if not is_training:
         assert weights_path.exists()
     model.reset_states()
     model.summary()

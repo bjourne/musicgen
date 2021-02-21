@@ -1,10 +1,12 @@
 # Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
 from collections import Counter, namedtuple
-from musicgen.code_utils import CODE_MIDI_MAPPING, INSN_END, INSN_PITCH
+from musicgen import dcode, pcode_abs, pcode_rel, scode_abs, scode_rel
+from musicgen.code_utils import (CODE_MIDI_MAPPING, INSN_END, INSN_PITCH,
+                                 guess_percussive_instruments)
 from musicgen.corpus import load_index
 from musicgen.generation import notes_to_audio_file
 from musicgen.parser import UnsupportedModule, load_file
-from musicgen import pcode_abs, pcode_rel, scode_abs, scode_rel
+from musicgen.rows import linearize_subsongs, rows_to_mod_notes
 from musicgen.utils import (SP, CharEncoder,
                             flatten, file_name_for_params,
                             load_pickle_cache, save_pickle)
@@ -15,41 +17,19 @@ CODE_MODULES = {
     'pcode_abs' : pcode_abs,
     'pcode_rel' : pcode_rel,
     'scode_abs' : scode_abs,
-    'scode_rel' : scode_rel
+    'scode_rel' : scode_rel,
+    'dcode' : dcode
 }
-
-# CodeInfo = namedtuple('CodeInfo', ['to_code_fn', 'to_notes_fn',
-#                                    'pause', 'metadata_fn'])
-
-# # TODO: Fix scode
-# CODE_TYPES = {
-#     'pcode_abs' : CodeInfo(lambda m: mod_to_pcode(m, False),
-#                            lambda c: pcode_to_notes(c, False),
-#                            pcode.pause(),
-#                            pcode.metadata),
-#     'pcode_rel' : CodeInfo(lambda m: mod_to_pcode(m, True),
-#                            lambda c: pcode_to_notes(c, True),
-#                            pcode.pause(),
-#                            pcode.metadata),
-#     'scode_abs' : CodeInfo(lambda m: mod_file_to_scode(m, False),
-#                            None,
-#                            scode.pause(),
-#                            None),
-#     'scode_rel' : CodeInfo(lambda m: mod_file_to_scode(m, True),
-#                            None,
-#                            scode.pause(),
-#                            None)
-# }
 
 def is_learnable(meta):
     n_toks = meta['n_toks']
     pitch_range = meta['pitch_range']
     n_notes = meta['n_notes']
     n_unique_notes = meta['n_unique_notes']
-    if n_toks < 64:
+    if n_toks < 128:
         SP.print('To few tokens, %d.' % n_toks)
         return False
-    if n_notes < 16:
+    if n_notes < 64:
         SP.print('To few notes, %d.' % n_notes)
         return False
     if n_unique_notes < 4:
@@ -60,51 +40,53 @@ def is_learnable(meta):
         return False
     return True
 
-def mod_file_to_code_w_progress(i, n, file_path, code_type):
+def mod_file_to_codes_w_progress(i, n, file_path, code_type):
     SP.header('[ %4d / %4d ] PARSING %s' % (i, n, file_path))
     try:
         mod = load_file(file_path)
     except UnsupportedModule:
         SP.print('Unsupported module format.')
         SP.leave()
-        return None
-
     code_mod = CODE_MODULES[code_type]
-    code = list(code_mod.to_code(mod)) + [(INSN_END, 0)]
-    if not is_learnable(code_mod.metadata(code)):
+
+    subsongs = list(linearize_subsongs(mod, 1))
+    volumes = [header.volume for header in mod.sample_headers]
+    for idx, (_, rows) in enumerate(subsongs):
+        SP.header('SUBSONG %d' % idx)
+        notes = rows_to_mod_notes(rows, volumes)
+        percussion = guess_percussive_instruments(mod, notes)
+        if notes:
+            fmt = '%d rows, %d ms/row, percussion %s, %d notes'
+            args = len(rows), notes[0].time_ms, percussion, len(notes)
+            SP.print(fmt % args)
+        pitches = {n.pitch_idx for n in notes
+                   if n.sample_idx not in percussion}
+        min_pitch = min(pitches, default = 0)
+        code = list(code_mod.to_code(notes, percussion, min_pitch))
+        if not is_learnable(code_mod.metadata(code)):
+            SP.leave()
+            continue
+        if code_mod.is_transposable():
+            codes = code_mod.transpose_code(code)
+        else:
+            codes = [code]
+        SP.print('%d transpositions' % len(codes))
+        for code in codes:
+            yield code
         SP.leave()
-        return None
     SP.leave()
-    return code
-
-def transpose_code(code):
-    pitches = [p for (c, p) in code if c == INSN_PITCH]
-
-    n_versions = 36 - max(pitches)
-    assert n_versions > 0
-    SP.print('%d transpositions.' % n_versions)
-
-    codes = [[(c, p) if c != 'P' else (c, p + i)
-              for (c, p) in code]
-             for i in range(n_versions)]
-    for i, code in enumerate(codes):
-        pitches = [p for (c, p) in code if c == INSN_PITCH]
-        assert min(pitches) == i
-        assert max(pitches) <= 35
-    return codes
 
 def load_and_encode_mod_files(mod_files, code_type):
     encoder = CharEncoder()
     arrs = []
     n = len(mod_files)
+    ending = [(INSN_END, 0)]
     for i, p, in enumerate(sorted(mod_files)):
-        code = mod_file_to_code_w_progress(i + 1, n, p, code_type)
-        if not code:
+        codes = list(mod_file_to_codes_w_progress(i + 1, n, p, code_type))
+        if not codes:
             continue
-        if CODE_MODULES[code_type].is_transposable():
-            codes = transpose_code(code)
-        else:
-            codes = [code]
+        # Add ending
+        codes = [code + ending for code in codes]
         codes = [encoder.encode_chars(c, True) for c in codes]
         arrs.append((p.name, codes))
     return encoder, arrs
@@ -205,7 +187,7 @@ def print_histogram(td):
     total = sum(v for (_, v) in counts)
     SP.header('%d TOKENS %d TYPES' % (total, len(counts)))
     for (cmd, arg), cnt in counts:
-        SP.print('%s %3d %10d' % (cmd, arg, cnt))
+        SP.print('%3s %10s %10d' % (cmd, arg, cnt))
     SP.leave()
 
 def load_training_data(code_type, path):

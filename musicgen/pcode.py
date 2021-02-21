@@ -9,7 +9,7 @@ from musicgen.code_utils import (BASE_ROW_TIME,
                                  fix_durations,
                                  guess_initial_pitch,
                                  guess_percussive_instruments)
-from musicgen.rows import ModNote, linearize_rows, rows_to_mod_notes
+from musicgen.rows import ModNote, rows_to_mod_notes
 from musicgen.utils import SP, sort_groupby
 
 def pause():
@@ -86,19 +86,7 @@ def metadata(pcode):
     meta['pitch_range'] = hi - lo
     return meta
 
-def to_code(mod, rel_pitches):
-    rows = linearize_rows(mod)
-    volumes = [header.volume for header in mod.sample_headers]
-    notes = rows_to_mod_notes(rows, volumes)
-
-    percussion = guess_percussive_instruments(mod, notes)
-    if notes:
-        fmt = 'Row time %d ms, guessed percussion: %s.'
-        SP.print(fmt % (notes[0].time_ms, percussion))
-
-    pitches = {n.pitch_idx for n in notes
-               if n.sample_idx not in percussion}
-    min_pitch = min(pitches, default = 0)
+def to_code(notes, rel_pitches, percussion, min_pitch):
     def note_to_event(n):
         si = n.sample_idx
         at = 4 * n.row_idx + n.col_idx
@@ -151,10 +139,24 @@ def test_encode_decode(mod_file, rel_pitches):
     from musicgen.code_utils import CODE_MIDI_MAPPING
     from musicgen.generation import notes_to_midi_file
     from musicgen.parser import load_file
+    from musicgen.rows import linearize_subsongs
     mod = load_file(mod_file)
-    pcode = list(to_code(mod, rel_pitches))
-    notes = to_notes(pcode, rel_pitches)
-    notes_to_midi_file(notes, 'test.mid', CODE_MIDI_MAPPING)
+    subsongs = linearize_subsongs(mod, 1)
+    volumes = [header.volume for header in mod.sample_headers]
+    for idx, (_, rows) in enumerate(subsongs):
+        notes = rows_to_mod_notes(rows, volumes)
+        percussion = guess_percussive_instruments(mod, notes)
+        if notes:
+            fmt = '%d rows, %d ms/row, percussion %s, %d notes'
+            args = len(rows), notes[0].time_ms, percussion, len(notes)
+            SP.print(fmt % args)
+        pitches = {n.pitch_idx for n in notes
+                   if n.sample_idx not in percussion}
+        min_pitch = min(pitches, default = 0)
+        code = to_code2(notes, rel_pitches, percussion, min_pitch)
+        notes = to_notes(code, rel_pitches)
+        fname = 'test-%02d.mid' % idx
+        notes_to_midi_file(notes, fname, CODE_MIDI_MAPPING)
 
 if __name__ == '__main__':
     from sys import argv

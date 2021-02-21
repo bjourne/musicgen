@@ -21,9 +21,8 @@ ROW_TIME_FACTOR_MS = 240
 def pause():
     return [(INSN_SILENCE, 16)]
 
-def produce_silence(delta, compress_silence):
-    if compress_silence:
-        delta = min(delta, MAX_COMPRESSED_SILENCE)
+def produce_silence(delta):
+    delta = min(delta, MAX_COMPRESSED_SILENCE)
     thresholds = [64, 32, 16, 8, 4, 3, 2, 1]
     for threshold in thresholds:
         while delta >= threshold:
@@ -31,44 +30,22 @@ def produce_silence(delta, compress_silence):
             delta -= threshold
     assert delta == 0
 
-def mod_notes_to_scode(notes, n_rows, percussion, compress_silence):
-    if not notes and not compress_silence:
-        for sil in produce_silence(n_rows, compress_silence):
-            yield INSN_SILENCE, sil
-        return
+def mod_notes_to_scode(notes, percussion):
     at = 0
     for note in notes:
         row_idx = note.row_idx
         sample_idx = note.sample_idx
         delta = row_idx - at
         if delta > 0:
-            for sil in produce_silence(delta, compress_silence):
+            for sil in produce_silence(delta):
                 yield INSN_SILENCE, sil
         if sample_idx in percussion:
             yield INSN_DRUM, percussion[sample_idx]
         else:
             yield INSN_PITCH, note.pitch_idx
         at = row_idx + 1
-    if at < n_rows and not compress_silence:
-        for sil in produce_silence(n_rows - at, compress_silence):
-            yield INSN_SILENCE, sil
 
-def to_code(mod, rel_pitches, compress_silence):
-    rows = linearize_rows(mod)
-    volumes = [header.volume for header in mod.sample_headers]
-    notes = rows_to_mod_notes(rows, volumes)
-    if not notes:
-        SP.print('Empty module.')
-        return None
-
-    percussion = guess_percussive_instruments(mod, notes)
-    fmt = 'Row time %d ms, guessed percussion: %s.'
-    SP.print(fmt % (notes[0].time_ms, percussion))
-
-    pitches = {n.pitch_idx for n in notes
-               if n.sample_idx not in percussion}
-    min_pitch = min(pitches, default = 0)
-
+def to_code(notes, rel_pitches, percussion, min_pitch):
     # Align pitches to 0 base
     for note in notes:
         note.pitch_idx -= min_pitch
@@ -76,10 +53,8 @@ def to_code(mod, rel_pitches, compress_silence):
     # No groupby.
     cols = [[n for n in notes if n.col_idx == i] for i in range(4)]
 
-    n_rows = len(rows)
-    code4 = [list(mod_notes_to_scode(col, n_rows, percussion,
-                                     compress_silence))
-             for col in cols]
+    # n_rows = len(rows)
+    code4 = [list(mod_notes_to_scode(col, percussion)) for col in cols]
     # Add join tokens to the first 3 columns but not the last which is
     # handled by model-trainer.py. Maybe change it in the future.
     for code in code4[:-1]:
