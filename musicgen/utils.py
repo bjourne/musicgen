@@ -58,13 +58,6 @@ def find_subseq(seq, subseq):
 ########################################################################
 # Pickle caching
 ########################################################################
-def encode_training_sequence(seq):
-    ix2ch = sorted(set(seq))
-    assert len(ix2ch) < 256
-    ch2ix = {c : i for i, c in enumerate(ix2ch)}
-    seq = np.array([ch2ix[ch] for ch in seq], dtype = np.uint8)
-    return ix2ch, ch2ix, seq
-
 def file_name_for_params(base, ext, params):
     def param_to_fmt(p):
         if type(p) == int:
@@ -137,5 +130,4 @@ class CharEncoder:
         return self.ch2ix[ch]
 
     def encode_chars(self, chars, add_missing):
-        seq = [self.encode_char(ch, add_missing) for ch in chars]
-        return np.array(seq, dtype = np.uint8)
+        return [self.encode_char(ch, add_missing) for ch in chars]
