@@ -5,6 +5,7 @@ from musicgen.training_data import (TrainingData,
                                     flatten_training_data,
                                     load_and_encode_mod_files,
                                     load_training_data,
+                                    mod_file_to_codes_w_progress,
                                     pick_song_fragment,
                                     print_histogram)
 from musicgen.utils import SP
@@ -18,7 +19,6 @@ TEST_PATH = Path() / 'tests' / 'mods'
 TMP_DIR = Path('/tmp/cache_tmp')
 
 def test_load_and_encode():
-    SP.enabled = True
     mod_file = TEST_PATH / 'im_a_hedgehog.mod'
     encoder, arrs = load_and_encode_mod_files([mod_file], 'pcode_abs')
     end_idx = encoder.encode_char((INSN_END, 0), False)
@@ -28,7 +28,6 @@ def test_load_and_encode():
         assert arr[-1] == end_idx
 
 def test_pcode_td():
-    SP.enabled = True
     td = TrainingData('pcode_abs')
     td.load_mod_file(TEST_PATH / 'im_a_hedgehog.mod')
     end_idx = td.encoder.encode_char((INSN_END, 0), False)
@@ -84,7 +83,6 @@ def maybe_build_index():
     save_index(TMP_DIR, index)
 
 def test_code_types():
-    SP.enabled = True
     maybe_build_index()
     td = TrainingData('pcode_abs')
     td.load_disk_cache(TMP_DIR, 150)
@@ -95,21 +93,18 @@ def test_code_types():
     assert len(td.arrs) == 31
 
 def test_scode_rel():
-    SP.enabled = True
     maybe_build_index()
     td = TrainingData('scode_rel')
     td.load_disk_cache(TMP_DIR, 150)
     assert len(td.arrs) == 31
 
 def test_dcode():
-    SP.enabled = True
     maybe_build_index()
     td = TrainingData('dcode')
     td.load_disk_cache(TMP_DIR, 150)
     assert len(td.arrs) == 31
 
 def test_pcode_rel():
-    SP.enabled = True
     td = TrainingData('pcode_rel')
     td.load_disk_cache(TMP_DIR, 150)
     assert len(td.arrs) == 31
@@ -125,3 +120,9 @@ def test_pcode_rel():
             assert len(arrs) == 1
         for arr in arrs:
             assert arr[-1] == end_idx
+
+def test_is_learnable():
+    file_path = TEST_PATH / 'youve_been_here.mod'
+    codes = list(mod_file_to_codes_w_progress(1, 1,
+                                              file_path, 'pcode_abs'))
+    assert len(codes) == 0

@@ -69,9 +69,9 @@ def is_percussive(n_pitches, n_unique, n_pitch_classes,
         if n_unique == 3 and max_ringout <= 0.11 and longest_rep >= 23:
             return True
 
-        # I'm not sure if this is a good idea or not.
+        # This heuristic is "unsafe" but removes a lot of noise.
         if n_unique == 2 and n_pitch_classes <= 1:
-            SP.print('PITCH CLASS THING %s' % n_pitches)
+            SP.print('A single pitch class, probably percussion.')
             return True
     return False
 
