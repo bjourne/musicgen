@@ -71,7 +71,7 @@ def is_percussive(n_pitches, n_unique, n_pitch_classes,
 
         # This heuristic is "unsafe" but removes a lot of noise.
         if n_unique == 2 and n_pitch_classes <= 1:
-            SP.print('A single pitch class, probably percussion.')
+            SP.print('Only one pitch class (%d pitches)' % n_pitches)
             return True
     return False
 
@@ -110,7 +110,6 @@ def get_sample_props(mod, sample_idx, notes):
     n_pitch_classes = len({p % 12 for p in counter})
 
     # Guess whether the sample is for a percussive instrument.
-    # SP.print(sample_idx)
     is_perc = is_percussive(n_pitches, n_unique, n_pitch_classes,
                             max_ringout, repeat_pct,
                             longest_rep,
