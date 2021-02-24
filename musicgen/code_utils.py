@@ -12,7 +12,7 @@ CODE_MIDI_MAPPING = {
     1 : [-1, 36, 4, 1.0],
     2 : [-1, 40, 4, 1.0],
     3 : [-1, 31, 4, 1.0],
-    4 : [1, 48, 4, 1.0]
+    4 : [1, 48, 3, 1.0]
     #4 : [1, 54, 3, 1.0]
 }
 BASE_ROW_TIME = 160
@@ -71,8 +71,7 @@ def transpose_code(code):
     n_versions = 36 - max(pitches)
     assert n_versions > 0
 
-    codes = [[(c, p) if c != 'P' else (c, p + i)
-              for (c, p) in code]
+    codes = [[(c, p) if c != 'P' else (c, p + i) for (c, p) in code]
              for i in range(n_versions)]
     for i, code in enumerate(codes):
         pitches = [p for (c, p) in code if c == INSN_PITCH]
