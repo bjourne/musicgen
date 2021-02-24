@@ -81,39 +81,41 @@ def mod_file_to_codes_w_progress(i, n, file_path, code_type):
 
 def load_and_encode_mod_files(mod_files, code_type):
     encoder = CharEncoder()
-    arrs = []
     n = len(mod_files)
     end_tok = (INSN_END, 0)
-    for i, p, in enumerate(sorted(mod_files)):
+    meta = []
+    data = []
+    offset = 0
+    for i, p, in enumerate(mod_files):
         codes = list(mod_file_to_codes_w_progress(i + 1, n, p, code_type))
         if not codes:
             continue
-        # Encode and add ending
-        codes = [c + [end_tok] for c in codes]
-        codes = [encoder.encode_chars(c, True) for c in codes]
-        arrs.append((p.name, codes))
-    return encoder, arrs
+        code = flatten([c + [end_tok] for c in codes])
+        code = encoder.encode_chars(code, True)
+        code = np.array(code, dtype = np.uint16)
+        data.append(code)
+        meta.append((offset, p.name))
+        offset += len(code)
+    return encoder, meta, np.concatenate(data)
 
-def build_cache(path, shuffle_file, mods, code_type):
+def build_cache(path, shuffle_path, mods, code_type):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
-    encoder, arrs = load_and_encode_mod_files(mod_files, code_type)
 
     # Cache the shuffle so that the train-validation split is the same
     # no matter the code type.
-    shuffle_path = path / shuffle_file
     def rebuild_fn():
-        n = len(arrs)
+        n = len(mods)
         SP.print('Shuffling %d mods.' % n)
         indices = list(range(n))
         shuffle(indices)
         return indices
+
+    # Shuffle according to cached indexes.
     indices = load_pickle_cache(shuffle_path, rebuild_fn)
+    tmp = [(i, e) for (i, e) in zip(indices, mod_files)]
+    mod_files = [e for (_, e) in sorted(tmp)]
 
-    # Shuffle according to indices.
-    tmp = [(i, e) for (i, e) in zip(indices, arrs)]
-    arrs = [e for (_, e) in sorted(tmp)]
-
-    return encoder, arrs
+    return load_and_encode_mod_files(mod_files, code_type)
 
 class TrainingData:
     def __init__(self, code_type):
@@ -132,33 +134,49 @@ class TrainingData:
                     and mod.format == 'MOD'
                     and mod.kb_size <= kb_limit)]
         size_sum = sum(mod.kb_size for mod in mods)
-        real_prefix = 'cache_%s' % self.code_type
+        prefix = 'cache_%s' % self.code_type
         params = size_sum, kb_limit
-        cache_file = file_name_for_params(real_prefix, 'pickle', params)
-        cache_path = path / cache_file
-        shuffle_file = file_name_for_params('shuffle', 'pickle', params)
+
+        cache = file_name_for_params(prefix, 'pickle.gz', params)
+        shuffle = file_name_for_params('shuffle', 'pickle.gz', params)
+
+        cache_dir = path / 'caches'
+        cache_dir.mkdir(exist_ok = True)
+        cache_path = cache_dir / cache
+        shuffle_path = cache_dir / shuffle
+
         def rebuild_fn():
-            return build_cache(path, shuffle_file, mods, self.code_type)
-        data = load_pickle_cache(cache_path, rebuild_fn)
-        self.encoder, self.arrs = data
+            return build_cache(path, shuffle_path, mods, self.code_type)
+        o = load_pickle_cache(cache_path, rebuild_fn)
+        self.encoder, self.meta, self.data = o
 
     def load_mod_file(self, p):
-        self.encoder, self.arrs = \
-            load_and_encode_mod_files([p], self.code_type)
+        o = load_and_encode_mod_files([p], self.code_type)
+        self.encoder, self.meta, self.data = o
 
     def split_3way(self, train_frac, valid_frac):
-        n_mods = len(self.arrs)
+        n_mods = len(self.meta)
         n_train = int(n_mods * train_frac)
         n_valid = int(n_mods * valid_frac)
         n_test = n_mods - n_train - n_valid
 
-        parts = (self.arrs[:n_train],
-                 self.arrs[n_train:n_train + n_valid],
-                 self.arrs[n_train + n_valid:])
+        valid_offset = self.meta[n_train][0]
+        test_offset = self.meta[n_train + n_valid][0]
+
         tds = [TrainingData(self.code_type) for _ in range(3)]
-        for td, part in zip(tds, parts):
-            td.arrs = part
+        tds[0].data = self.data[:valid_offset]
+        tds[0].meta = self.meta[:n_train]
+
+        tds[1].data = self.data[valid_offset:test_offset]
+        tds[1].meta = self.meta[n_train:n_train + n_valid]
+
+        tds[2].data = self.data[test_offset:]
+        tds[2].meta = self.meta[n_train + n_valid:]
+
+        for td in tds:
+            base_ofs = td.meta[0][0]
             td.encoder = self.encoder
+            td.meta = [(o - base_ofs, n) for (o, n) in td.meta]
         return tds
 
     def save_code(self, seq, file_path):
@@ -169,19 +187,14 @@ class TrainingData:
             notes = CODE_MODULES[self.code_type].to_notes(code)
             notes_to_audio_file(notes, file_path, CODE_MIDI_MAPPING, True)
 
-def flatten_training_data(td):
-    arrs = flatten([arrs for (_, arrs) in td.arrs])
-    return np.concatenate(arrs)
-
-def tally_tokens(td):
-    seq = flatten_training_data(td)
-    unique, counts = np.unique(seq, return_counts = True)
-    ch_counts = [(td.encoder.decode_char(ix), cnt) for (ix, cnt) in
+def tally_tokens(encoder, data):
+    unique, counts = np.unique(data, return_counts = True)
+    ch_counts = [(encoder.decode_char(ix), cnt) for (ix, cnt) in
                  zip(unique, counts)]
     return sorted(ch_counts)
 
 def print_histogram(td):
-    counts = tally_tokens(td)
+    counts = tally_tokens(td.encoder, td.data)
     total = sum(v for (_, v) in counts)
     SP.header('%d TOKENS %d TYPES' % (total, len(counts)))
     for (cmd, arg), cnt in counts:
@@ -199,26 +212,39 @@ def load_training_data(code_type, path):
     print_histogram(td)
     return train, valid, test
 
-def pick_song_fragment(seq, i, n, end_ix):
+def find_name_by_offset(meta, seek):
+    at = meta[0][0]
+    for ofs, name in meta[1:]:
+        if ofs > seek:
+            return at
+        at = name
+    return meta[-1][1]
+
+def pick_song_fragment(td, i, n):
     if i != 'random':
         i = int(i)
-        return i, seq[i:i + n]
-    while True:
-        i = randrange(len(seq) - n)
-        fragment = seq[i:i + n]
-        if end_ix in fragment:
-            SP.print('EOS in fragment, regenerating.')
-            continue
-        return i, fragment
+        frag = td.data[i:i + n]
+    else:
+        end_idx = td.encoder.encode_char((INSN_END, 0), False)
+        while True:
+            i = randrange(len(td.data) - n)
+            frag = td.data[i:i + n]
+            if end_idx in frag:
+                SP.print('EOS in fragment, regenerating.')
+            else:
+                break
+        assert not end_idx in frag
+    name = find_name_by_offset(td.meta, i)
+    fmt = 'Picked fragment at %d+%d of song %s.'
+    SP.print(fmt % (i, len(frag), name))
+    return i, frag
 
 if __name__ == '__main__':
+    from random import choice
     from pathlib import Path
     from sys import argv
     SP.enabled = True
     _, _, td = load_training_data('pcode_abs', Path(argv[1]))
-    end_idx = td.encoder.encode_char((INSN_END, 0), True)
-    seq = flatten_training_data(td)
-    for i in range(10):
-        ofs, frag = pick_song_fragment(seq, 'random', 1500, end_idx)
-        SP.print('Picked fragment %d+%d.' % (ofs, len(frag)))
+    for i in range(3):
+        ofs, frag = pick_song_fragment(td, 'random', 1000)
         td.save_code(frag, Path('test-%02d.mid' % i))

@@ -3,9 +3,10 @@
 # Random utils.
 from collections import Counter
 from functools import reduce
+from gzip import compress, decompress
 from itertools import groupby
 from operator import iconcat
-from pickle import dump, load
+from pickle import dumps, loads
 from time import time
 
 class StructuredPrinter:
@@ -76,13 +77,12 @@ def file_name_for_params(base, ext, params):
     return '%s-%s.%s' % (base, '-'.join(strs), ext)
 
 def load_pickle(pickle_path):
-    assert pickle_path.exists()
     with open(pickle_path, 'rb') as f:
-        return load(f)
+        return loads(decompress(f.read()))
 
-def save_pickle(pickle_path, obj):
-    with open(pickle_path, 'wb') as f:
-        dump(obj, f)
+def save_pickle(path, obj):
+    with open(path, 'wb') as f:
+        f.write(compress(dumps(obj)))
 
 def load_pickle_cache(cache_path, rebuild_fun):
     if not cache_path.exists():

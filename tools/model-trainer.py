@@ -28,8 +28,7 @@ from docopt import docopt
 from musicgen.params import ModelParams
 from musicgen.tensorflow import (compiled_model_from_params,
                                  sequence_to_samples)
-from musicgen.training_data import (flatten_training_data,
-                                    load_training_data)
+from musicgen.training_data import load_training_data
 from musicgen.utils import SP
 from pathlib import Path
 from tensorflow.keras.callbacks import *
@@ -37,11 +36,9 @@ from tensorflow.keras.callbacks import *
 import numpy as np
 import tensorflow as tf
 
-def training_data_to_dataset(training_data, seq_len, batch_size):
-    seq = flatten_training_data(training_data)
-    dataset = sequence_to_samples(seq, seq_len)
-    dataset = dataset.batch(batch_size, drop_remainder = True)
-    return dataset
+def training_data_to_dataset(td, seq_len, batch_size):
+    ds = sequence_to_samples(td.data, seq_len)
+    return ds.batch(batch_size, drop_remainder = True)
 
 def main():
     # Prologue
@@ -57,18 +54,20 @@ def main():
     train, valid, test = load_training_data(params.code_type, path)
     vocab_size = len(train.encoder.ix2ch)
 
-    args = len(train.arrs), len(valid.arrs), len(test.arrs)
+    args = len(train.meta), len(valid.meta), len(test.meta)
     SP.print('Train/valid/test split %d/%d/%d' % args)
 
-    model = compiled_model_from_params(path, params, vocab_size,
-                                       None, False)
-
-    log_path = path / params.log_file()
+    weights_dir = path / 'weights'
+    weights_dir.mkdir(exist_ok = True)
+    weights_path = weights_dir / params.weights_file()
+    log_path = weights_dir / params.log_file()
     def log_losses(epoch, logs):
         with open(log_path, 'at') as outf:
             outf.write('%d %.5f %.5f\n'
                        % (epoch, logs['loss'], logs['val_loss']))
-    weights_path = path / params.weights_file()
+    model = compiled_model_from_params(weights_dir, params, vocab_size,
+                                       None, True)
+
     cb_epoch_end = LambdaCallback(on_epoch_end = log_losses)
     cb_best = ModelCheckpoint(
         str(weights_path),

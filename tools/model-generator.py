@@ -28,10 +28,8 @@ from musicgen.code_utils import INSN_END
 from musicgen.params import ModelParams
 from musicgen.tensorflow import (compiled_model_from_params,
                                  select_strategy)
-from musicgen.training_data import (flatten_training_data,
-                                    load_training_data,
-                                    pick_song_fragment)
-from musicgen.utils import SP, find_subseq
+from musicgen.training_data import load_training_data, pick_song_fragment
+from musicgen.utils import SP
 from pathlib import Path
 from random import randrange
 from tensorflow.nn import softmax
@@ -49,8 +47,25 @@ def top_p_skew(P, top_p):
     top_n = len(PC[PC <= top_p]) + 1
 
     # Clear the prob of those who didn't make it.
-    P[prob_ixs[top_n:]] = 0.0
+    P[prob_ixs[top_n:]] = np.finfo('float').eps
     return P / P.sum()
+
+def sample_logits(logits, preds, end_ix, temps, top_ps):
+    n_temps = len(temps)
+    eps = np.finfo('float').eps
+
+    Ps = softmax(logits).numpy()
+    print('%4d: Maxes: %s' % (len(preds[0]),
+                               np.around(np.max(Ps, axis = 1), 4)))
+
+    # Dont sample end tokens
+    Ps[:, end_ix] = eps
+    for i, temp in enumerate(temps):
+        Ps[i] = temperature_skew(Ps[i], temp)
+    for i, top_p in enumerate(top_ps):
+        Ps[i + n_temps] = top_p_skew(Ps[i + n_temps], top_p)
+    ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
+    return ixs, [np.log(Ps[i, ix]) for i, ix in enumerate(ixs)]
 
 def lstm_continuation(model, temps, top_ps, seed,
                       n_samples, max_seq_len, end_ix):
@@ -63,63 +78,59 @@ def lstm_continuation(model, temps, top_ps, seed,
     n_temps = len(temps)
     n_top_ps = len(top_ps)
     n_preds = n_temps + n_top_ps
-    log_probs = [0] * n_preds
-    eps = np.finfo('float').eps
+    log_prob_sums = np.zeros(n_preds)
+    #log_probs = [0] * n_preds
+    # eps = np.finfo('float').eps
+
+    #for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
 
     SP.print('Predicting %d tokens.' % n_samples)
-    for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
+    for _ in range(n_samples):
         last_word = preds[-1]
-        logits = model.predict(last_word)[:, 0, :]
-        Ps = softmax(logits).numpy()
+        logits = model.predict(last_word)[:, -1, :]
 
-        # Dont sample end tokens
-        Ps[:, end_ix] = eps
+        ixs, log_probs = sample_logits(logits, preds, end_ix,
+                                       temps, top_ps)
+        log_prob_sums += log_probs
 
-        for i in range(n_temps):
-            Ps[i] = temperature_skew(Ps[i], temps[i])
-
-        for i in range(n_top_ps):
-            Ps[i + n_temps] = top_p_skew(Ps[i + n_temps], top_ps[i])
-
-        ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
-        for i, ix in enumerate(ixs):
-            log_probs[i] += np.log(Ps[i, ix])
+        # Ps = softmax(logits).numpy()
+        # # Dont sample end tokens
+        # Ps[:, end_ix] = eps
+        # for i in range(n_temps):
+        #     Ps[i] = temperature_skew(Ps[i], temps[i])
+        # for i in range(n_top_ps):
+        #     Ps[i + n_temps] = top_p_skew(Ps[i + n_temps], top_ps[i])
+        # ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
+        # for i, ix in enumerate(ixs):
+        #     log_probs[i] += np.log(Ps[i, ix])
         preds = np.vstack((preds, ixs))
 
     SP.leave()
     # Skip the first element which is not actually a prediction.
-    return preds.T[:,1:], log_probs
+    return preds.T[:,1:], log_prob_sums
 
 def transformer_continuation(model, temps, top_ps, seed, n_samples,
-                             max_seq_len):
+                             max_seq_len, end_ix):
     seed = np.array(seed, dtype = np.int32)
-    n_temps = len(temps)
-    n_top_ps = len(top_ps)
-    n_preds = n_temps + n_top_ps
-    log_probs = [0] * n_preds
-    preds = []
+    log_prob_sums = np.zeros(len(temps) + len(top_ps))
+    preds = [[] for _ in temps + top_ps]
     SP.print('Predicting %d tokens.' % n_samples)
-    for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
-        y = model(seed, training = False)
-        Ps = y[:, -1, :]
-        Ps = softmax(Ps).numpy()
-        for i in range(n_temps):
-            Ps[i] = temperature_skew(Ps[i], temps[i])
-        for i in range(n_top_ps):
-            Ps[i + n_temps] = top_p_skew(Ps[i + n_temps], top_ps[i])
-        ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
-        preds.append(ixs)
+    # for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
+    for _ in range(n_samples):
+        logits = model(seed, training = False)[:, -1, :]
+        ixs, log_probs = sample_logits(logits, preds, end_ix,
+                                       temps, top_ps)
 
-        for i, ix in enumerate(ixs):
-            log_probs[i] += np.log(Ps[i, ix])
+        for ix, pred in zip(ixs, preds):
+            pred.append(ix)
+        log_prob_sums += log_probs
 
         # Append column
         seed = np.append(seed, np.expand_dims(ixs, 1), axis = 1)
         if seed.shape[1] >= max_seq_len:
             # Delete first column
             seed = seed[:, 1:]
-    return [[int(preds[j][i]) for j in range(n_samples)]
-            for i in range(n_temps + n_top_ps)], log_probs
+    return np.array(preds), log_prob_sums
 
 def main():
     # Prologue
@@ -135,9 +146,14 @@ def main():
     n_temps = len(temps)
     n_top_ps = len(top_ps)
     n_preds = n_temps + n_top_ps
-    n_samples = 1200
-    n_seed = 256
+    n_samples = 500
+    n_seed = 32
+
     enc = td.encoder
+    seq = td.data
+    end_ix = td.encoder.encode_char((INSN_END, 0), False)
+    pause = td.encoder.encode_chars(td.pause_code(), False)
+
     vocab_size = len(enc.ix2ch)
     seed_ix = args['--seed-idx']
     max_seq_len = int(args['--seq-len'])
@@ -145,10 +161,9 @@ def main():
 
     SP.header('%d PREDICTIONS' % n_preds)
 
-    model = compiled_model_from_params(path, params, vocab_size,
-                                       n_preds, True)
-    seq = flatten_training_data(td)
-    end_ix = enc.encode_char((INSN_END, 0), True)
+    weights_dir = path / 'weights'
+    model = compiled_model_from_params(weights_dir, params, vocab_size,
+                                       n_preds, False)
 
     n_frag = n_seed + n_samples
     seed_ix, frag = pick_song_fragment(seq, seed_ix, n_frag, end_ix)
@@ -172,7 +187,6 @@ def main():
 
     seed = np.vstack((seed, seed[0]))
 
-    pause = enc.encode_chars(td.pause_code(), False).tolist()
     join = np.repeat(np.expand_dims(pause, 0), len(seqs), axis = 0)
     seqs = np.hstack((seed, join, seqs))
 
@@ -182,7 +196,7 @@ def main():
 
     # Add orig
     file_names.append('%s-orig' % prefix)
-    log_probs.append(0)
+    log_probs = np.append(log_probs, 0)
 
     base_path = path / 'generated'
     base_path.mkdir(exist_ok = True)
