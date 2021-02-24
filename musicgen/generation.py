@@ -1,4 +1,4 @@
-# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+# Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
 #
 # Utilities for MIDI generation
 from collections import namedtuple
@@ -101,7 +101,6 @@ def midi_notes_to_track(channel, notes):
         prev = ofs
 
 def notes_to_midi_file(notes, midi_file, midi_mapping):
-    SP.print('%d notes to convert.', len(notes))
     SP.header('MIDI MAPPING', '%d samples', len(midi_mapping))
     SP.print('sample midi base dur  vol')
     fmt = '%6d %4d %4d %3d %3.2f'
