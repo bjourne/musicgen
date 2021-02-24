@@ -7,7 +7,6 @@ from itertools import groupby
 from operator import iconcat
 from pickle import dump, load
 from time import time
-import numpy as np
 
 class StructuredPrinter:
     def __init__(self, enabled):
