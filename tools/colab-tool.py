@@ -67,13 +67,13 @@ def upload_file(connection, local_path):
     files = [(local_path, local_path.name)]
     upload_files(connection, files)
 
-def run_python_file(connection, root_path, file_name, args):
+def run_python_file(conn, root_path, file_name, args):
     cmds = [f'cd "{root_path}"',
             'export PYTHONPATH="."',
             'python3 %s %s' % (file_name, ' '.join(args))]
     script = ' && '.join(cmds)
     SP.print('Running %s...' % file_name)
-    connection.run(script, pty = True)
+    conn.run(script, pty = True)
 
 def main():
     args = docopt(__doc__, version = 'Colab Tool 1.0')
@@ -93,6 +93,7 @@ def main():
     port = int(port)
 
     connect_kwargs = {'password' : password}
+    SP.print('Connecting to %s' % host)
     conn = Connection(host, 'root', port, connect_kwargs = connect_kwargs)
     sftp = conn.sftp()
     SP.print('Changing to dir "%s".' % root_path)
