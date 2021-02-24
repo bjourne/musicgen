@@ -1,7 +1,7 @@
 from musicgen import code_utils, pcode
 
-def to_code(mod, percussion, min_pitch):
-    return pcode.to_code(mod, False, percussion, min_pitch)
+def to_code(notes, percussion, min_pitch):
+    return pcode.to_code(notes, False, percussion, min_pitch)
 
 def to_notes(code):
     return pcode.to_notes(code, False)
