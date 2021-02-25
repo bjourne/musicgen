@@ -34,6 +34,7 @@ class StructuredPrinter:
 
     def leave(self):
         self.indent -= 2
+        assert self.indent >= 0
 
 SP = StructuredPrinter(False)
 
