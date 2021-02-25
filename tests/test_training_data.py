@@ -85,29 +85,29 @@ def test_code_types():
     maybe_build_index()
     td = TrainingData('pcode_abs')
     td.load_disk_cache(TMP_DIR, 150)
-    assert len(td.meta) == 31
+    assert len(td.meta) == 32
 
     td = TrainingData('scode_abs')
     td.load_disk_cache(TMP_DIR, 150)
-    assert len(td.meta) == 31
+    assert len(td.meta) == 32
 
 def test_scode_rel():
     maybe_build_index()
     td = TrainingData('scode_rel')
     td.load_disk_cache(TMP_DIR, 150)
-    assert len(td.meta) == 32
+    assert len(td.meta) == 33
 
 def test_dcode():
     maybe_build_index()
     td = TrainingData('dcode')
     td.load_disk_cache(TMP_DIR, 150)
-    assert len(td.meta) == 31
+    assert len(td.meta) == 32
 
 def test_pcode_rel():
     maybe_build_index()
     td = TrainingData('pcode_rel')
     td.load_disk_cache(TMP_DIR, 150)
-    assert len(td.meta) == 32
+    assert len(td.meta) == 33
     end_idx = td.encoder.encode_char((INSN_END, 0), False)
 
     transpositions_per_song = {
