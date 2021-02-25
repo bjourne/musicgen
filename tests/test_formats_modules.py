@@ -72,6 +72,10 @@ def test_percussive_samples():
     mod = load_file(TEST_PATH / 'afro_afro.mod')
     assert percussive_samples(mod) == {1, 2, 5, 6, 7, 8}
 
+    # This is a difficult one
+    mod = load_file(TEST_PATH / 'zodiak_-_gasp.mod')
+    assert percussive_samples(mod) == {3, 4}
+
 def test_period_to_idx():
     idx = period_to_idx(679)
     assert PERIODS[idx] == 678
