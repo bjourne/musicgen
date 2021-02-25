@@ -1,27 +1,8 @@
 # Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
-from collections import Counter, defaultdict, namedtuple
+from collections import Counter, namedtuple
 from itertools import groupby
 from musicgen.defs import AMIGA_SAMPLE_RATE, BASE_FREQ, FREQS
 from musicgen.utils import SP, sort_groupby
-
-HEADER = [
-    'Sample',
-    'Common freq',
-    'N. Notes', 'N. Uniq',
-    'Longest rep',
-    'Size',
-    'Note dur',
-    'Repeat pct',
-    'Max ringout',
-    'Percussive?'
-]
-ROW_FORMAT = ['%2d',
-              '%.2f',
-              '%3d', '%2d',
-              '%3d', '%5d', '%2d',
-              '%.2f',
-              '%.2f',
-              '%s']
 
 SampleProps = namedtuple('SampleProps', [
     'most_common_freq',
@@ -146,35 +127,3 @@ def sample_props(mod, notes):
     grouped = sort_groupby(analyze_notes, lambda n: n.sample_idx)
     return {sample : get_sample_props(mod, sample, list(group))
             for (sample, group) in grouped}
-
-def main():
-    from argparse import ArgumentParser, FileType
-    from musicgen.parser import load_file
-    from musicgen.rows import linearize_subsongs, rows_to_mod_notes
-    from termtables import print as tt_print
-    from termtables.styles import ascii_booktabs, booktabs
-
-    parser = ArgumentParser(
-        description = 'Analyze MOD files')
-    parser.add_argument('module', type = FileType('rb'))
-    args = parser.parse_args()
-    args.module.close()
-
-    mod = load_file(args.module.name)
-    rows = list(linearize_subsongs(mod, 1))[0][1]
-    volumes = [header.volume for header in mod.sample_headers]
-    notes = rows_to_mod_notes(rows, volumes)
-    props = sample_props(mod, notes)
-
-    # Make a table
-    rows = [(sample,) + p for (sample, p) in props.items()]
-    rows = [[fmt % col for (col, fmt) in zip(row, ROW_FORMAT)]
-            for row in rows]
-    tt_print(rows,
-             padding = (0, 0, 0, 0),
-             alignment = 'rrrrrrrrrc',
-             style = ascii_booktabs,
-             header = HEADER)
-
-if __name__ == '__main__':
-    main()
