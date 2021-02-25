@@ -150,7 +150,6 @@ def main():
     n_seed = 32
 
     enc = td.encoder
-    seq = td.data
     end_ix = td.encoder.encode_char((INSN_END, 0), False)
     pause = td.encoder.encode_chars(td.pause_code(), False)
 
@@ -166,10 +165,9 @@ def main():
                                        n_preds, False)
 
     n_frag = n_seed + n_samples
-    seed_ix, frag = pick_song_fragment(seq, seed_ix, n_frag, end_ix)
-    SP.print('Seed %d+%d.' % (seed_ix, n_seed))
+    seed_ix, frag = pick_song_fragment(td, seed_ix, n_frag)
 
-    seed = seq[seed_ix:seed_ix + n_seed]
+    seed, orig = frag[:n_seed], frag[n_seed:]
     seed = np.repeat(np.expand_dims(seed, 0), n_preds, axis = 0)
 
     mtype = params.model_type
@@ -181,10 +179,7 @@ def main():
     seqs, log_probs = cont_fn(model, temps, top_ps, seed, n_samples,
                               max_seq_len, end_ix)
 
-    # Add the original
-    orig = seq[seed_ix + n_seed:seed_ix + n_frag]
     seqs = np.vstack((seqs, orig))
-
     seed = np.vstack((seed, seed[0]))
 
     join = np.repeat(np.expand_dims(pause, 0), len(seqs), axis = 0)
