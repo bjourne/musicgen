@@ -16,10 +16,8 @@ from docopt import docopt
 from musicgen.analyze import dissonant_chords, sample_props
 from musicgen.parser import UnsupportedModule, load_file
 from musicgen.rows import linearize_subsongs, rows_to_mod_notes
-from musicgen.utils import SP, sort_groupby
+from musicgen.utils import SP, sort_groupby, print_term_table
 from pathlib import Path
-from termtables import print as tt_print
-from termtables.styles import ascii_booktabs, booktabs
 
 def main():
     args = docopt(__doc__, version = 'MIDI file generator 1.0')
@@ -58,18 +56,12 @@ def main():
         '%3d', '%5d', '%2d',
         '%.2f',
         '%.2f',
-        '%s'
+        lambda x: 'T' if x else 'F'
     ]
 
     # Make a table
     rows = [(sample,) + p for (sample, p) in props.items()]
-    rows = [[fmt % col for (col, fmt) in zip(row, row_fmt)]
-            for row in rows]
-    tt_print(rows,
-             padding = (0, 0, 0, 0),
-             alignment = 'rrrrrrrrrc',
-             style = ascii_booktabs,
-             header = header)
+    print_term_table(row_fmt, rows, header, 'rrrrrrrrrc')
 
     n_chords, n_diss_chords = dissonant_chords(mel_notes)
     diss_frac = n_diss_chords / n_chords if n_chords else 0.0
@@ -84,10 +76,7 @@ def main():
         ['Chords', n_chords],
         ['Chord dissonance', '%.2f' % diss_frac]
     ]
-    tt_print(rows,
-             padding = (0, 0, 0, 0),
-             alignment = 'lr',
-             style = ascii_booktabs)
+    print_term_table(['%s', '%s'], rows, ['Key', 'Value'], 'lr')
 
 if __name__ == '__main__':
     main()

@@ -26,9 +26,7 @@ from collections import Counter
 from docopt import docopt
 from pathlib import Path
 from musicgen.corpus import *
-from musicgen.utils import SP, sort_groupby
-from termtables import print as tt_print
-from termtables.styles import markdown
+from musicgen.utils import SP, print_term_table, sort_groupby
 
 def print_freq_table(seq, header, sort_key):
     counts = Counter(seq)
@@ -36,19 +34,12 @@ def print_freq_table(seq, header, sort_key):
     header = [header] + ['Count', 'Freq.']
     rows = [(k, v, v / total) for (k, v) in counts.items()]
     rows = sorted(rows, key = sort_key)
-    rows = [(k, v, '%.4f' % t) for (k, v, t) in rows]
-
     if type(seq[0]) == int:
         col_align = 'r'
     else:
         col_align = 'l'
 
-    tt_print(rows,
-             padding = (0, 1),
-             alignment = col_align + 'rr',
-             style = markdown,
-             header = header)
-    print()
+    print_term_table(['%s', '%d', '%.4f'], rows, header, col_align + 'rr')
 
 def bin_value(value, thresholds):
     for threshold in thresholds:

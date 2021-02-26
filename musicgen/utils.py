@@ -7,6 +7,7 @@ from gzip import compress, decompress
 from itertools import groupby
 from operator import iconcat
 from pickle import dumps, loads
+from termtables import to_string
 from time import time
 
 class StructuredPrinter:
@@ -56,9 +57,6 @@ def find_subseq(seq, subseq):
         if seq[i:i+l] == subseq:
             yield i
 
-########################################################################
-# Pickle caching
-########################################################################
 def file_name_for_params(base, ext, params):
     def param_to_fmt(p):
         if type(p) == int:
@@ -132,3 +130,19 @@ class CharEncoder:
 
     def encode_chars(self, chars, add_missing):
         return [self.encode_char(ch, add_missing) for ch in chars]
+
+def print_term_table(row_fmt, rows, header, alignment):
+    def format_col(fmt, col):
+        if callable(fmt):
+            return fmt(col)
+        return fmt % col
+    rows = [[format_col(*e) for e in zip(row_fmt, row)] for row in rows]
+    s = to_string(rows,
+                  header = header,
+                  padding = (0, 0, 0, 0),
+                  alignment = alignment,
+                  style = "            -- ")
+    m = len(s.splitlines()[1]) - 2
+    print(' ' + '=' * m)
+    print(s)
+    print(' ' + '=' * m)
