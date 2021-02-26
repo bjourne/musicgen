@@ -4,6 +4,27 @@ from itertools import groupby
 from musicgen.defs import AMIGA_SAMPLE_RATE, BASE_FREQ, FREQS
 from musicgen.utils import SP, sort_groupby
 
+def is_dissonant(classes):
+    for cl in classes:
+        left = (cl - 1) % 12
+        right = (cl + 1) % 12
+        if left in classes or right in classes:
+            return True
+    return False
+
+def dissonant_chords(mel_notes):
+    notes_per_row = sort_groupby(mel_notes, lambda n: n.row_idx)
+    n_chords = 0
+    n_diss_chords = 0
+    for row, notes in notes_per_row:
+        notes = list(notes)
+        classes = frozenset([n.pitch_idx % 12 for n in notes])
+        if len(classes) > 1:
+            n_chords += 1
+            if is_dissonant(classes):
+                n_diss_chords += 1
+    return n_chords, n_diss_chords
+
 SampleProps = namedtuple('SampleProps', [
     'most_common_freq',
     'n_notes',
@@ -53,6 +74,14 @@ def is_percussive(n_pitches, n_unique, n_pitch_classes,
         # This heuristic is "unsafe" but removes a lot of noise.
         if n_unique == 2 and n_pitch_classes <= 1:
             SP.print('Only one pitch class (%d pitches)' % n_pitches)
+            return True
+
+    # Sample is repeating, might still be percussive
+    # (alfrdchi_endofgame1.mod)
+    if repeat_pct > 0.0 and n_unique == 1:
+        if longest_rep >= 100:
+            return True
+        if longest_rep == n_pitches:
             return True
     return False
 

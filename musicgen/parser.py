@@ -158,7 +158,7 @@ def load_file(fname):
         return ModuleSTK.parse(arr)
 
     # Unknown module type. Bail out.
-    raise ValueError(f'Unknown magic "{magic}"!')
+    raise UnsupportedModule(f'Unknown magic "{magic}"!')
 
 def save_file(fname, mod):
     if type(mod) == dict:

@@ -51,7 +51,7 @@ def test_sample_length():
     mod = load_file(TEST_PATH / 'his_hirsute_ant.mod')
     assert len(mod.samples[0].bytes) == 0x23ca
 
-# Testing heuristics for detecting percussive samples.
+# Testing for some heuristic madness.
 def test_percussive_samples():
     mod = load_file(TEST_PATH / 'androidr.mod')
     assert percussive_samples(mod) == {2, 3, 4}
@@ -75,6 +75,10 @@ def test_percussive_samples():
     # This is a difficult one
     mod = load_file(TEST_PATH / 'zodiak_-_gasp.mod')
     assert percussive_samples(mod) == {3, 4}
+
+    # Percussive instruments are repeating...
+    mod = load_file(TEST_PATH / 'alfrdchi_endofgame1.mod')
+    assert percussive_samples(mod) == {1, 2, 3, 4, 5, 6, 8}
 
 def test_period_to_idx():
     idx = period_to_idx(679)

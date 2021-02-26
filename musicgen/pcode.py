@@ -1,4 +1,4 @@
-# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+# Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
 #
 # PCode stands for parallel or polyphonic code.
 from musicgen.code_utils import (BASE_ROW_TIME,
@@ -13,7 +13,7 @@ from musicgen.rows import ModNote, rows_to_mod_notes
 from musicgen.utils import SP, sort_groupby
 
 def pause():
-    return [(INSN_SILENCE, 16)] * 8
+    return [(INSN_SILENCE, 16)] * 4
 
 def to_notes(pcode, rel_pitches):
     if rel_pitches:
@@ -45,7 +45,7 @@ def to_notes(pcode, rel_pitches):
 
     # Guess and set row time
     row_indices = {n.row_idx for n in notes}
-    max_row = max(row_indices)
+    max_row = max(row_indices, default = 1)
     row_time_ms = int(BASE_ROW_TIME * len(row_indices) / max_row)
     for n in notes:
         n.time_ms = row_time_ms
@@ -57,34 +57,7 @@ def to_notes(pcode, rel_pitches):
     cols = sort_groupby(notes, lambda n: n.col_idx)
     for _, col in cols:
         fix_durations(list(col))
-    SP.leave()
     return notes
-
-def metadata(pcode):
-    meta = {}
-    meta['n_toks'] = len(pcode)
-
-    notes = [(c, a) for (c, a) in pcode if c != INSN_SILENCE]
-    meta['n_notes'] = len(notes)
-
-    mel_notes_abs = [a for (c, a) in pcode if c == INSN_PITCH]
-    mel_notes_rel = [a for (c, a) in pcode if c == INSN_REL_PITCH]
-    rel_pitches = True if mel_notes_rel else False
-    mel_notes = mel_notes_rel if rel_pitches else mel_notes_abs
-
-    meta['n_unique_notes'] = len(set(mel_notes))
-
-    at = 0
-    lo, hi = 0, 0
-    for mel_note in mel_notes:
-        if rel_pitches:
-            at += mel_note
-        else:
-            at = mel_note
-        lo = min(at, lo)
-        hi = max(at, hi)
-    meta['pitch_range'] = hi - lo
-    return meta
 
 def to_code(notes, rel_pitches, percussion, min_pitch):
     def note_to_event(n):

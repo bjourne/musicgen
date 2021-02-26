@@ -9,9 +9,6 @@ def to_notes(code):
 def pause():
     return pcode.pause()
 
-def metadata(code):
-    return pcode.metadata(code)
-
 def is_transposable():
     return True
 

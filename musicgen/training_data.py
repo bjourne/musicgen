@@ -4,12 +4,14 @@ from musicgen import dcode, pcode_abs, pcode_rel, scode_abs, scode_rel
 from musicgen.code_utils import (CODE_MIDI_MAPPING, INSN_END, INSN_PITCH,
                                  guess_percussive_instruments)
 from musicgen.corpus import load_index
+from musicgen.analyze import dissonant_chords
 from musicgen.generation import notes_to_audio_file
 from musicgen.parser import UnsupportedModule, load_file
 from musicgen.rows import linearize_subsongs, rows_to_mod_notes
 from musicgen.utils import (SP, CharEncoder,
                             flatten, file_name_for_params,
-                            load_pickle_cache, save_pickle)
+                            load_pickle_cache, save_pickle,
+                            sort_groupby)
 from random import randrange, shuffle
 import numpy as np
 
@@ -21,63 +23,134 @@ CODE_MODULES = {
     'dcode' : dcode
 }
 
-def is_learnable(meta):
-    n_toks = meta['n_toks']
-    pitch_range = meta['pitch_range']
-    n_notes = meta['n_notes']
-    n_unique_notes = meta['n_unique_notes']
-    if n_toks < 128:
-        SP.print('To few tokens, %d.' % n_toks)
-        return False
+ERR_DISSONANCE = 0
+ERR_FEW_NOTES = 1
+ERR_FEW_MEL_NOTES = 2
+ERR_FEW_UNIQUE_PITCHES = 3
+ERR_PARSE_ERROR = 4
+ERR_PITCH_RANGE = 5
+ERR_EXCESSIVE_PERCUSSION = 6
+
+def training_error(notes, percussion):
+    n_notes = len(notes)
     if n_notes < 64:
-        SP.print('To few notes, %d.' % n_notes)
-        return False
-    if n_unique_notes < 4:
-        SP.print('To few unique melodic notes, %d.' % n_unique_notes)
-        return False
+        return ERR_FEW_NOTES, n_notes
+    mel_notes = {n for n in notes if not n.sample_idx in percussion}
+    perc_notes = {n for n in notes if n.sample_idx in percussion}
+    n_mel_notes = len(mel_notes)
+    n_perc_notes = len(perc_notes)
+    assert n_mel_notes + n_perc_notes == n_notes
+    if n_mel_notes < 32:
+        return ERR_FEW_MEL_NOTES, n_mel_notes
+
+    pitches = {n.pitch_idx for n in mel_notes}
+    n_unique_pitches = len(pitches)
+    if n_unique_pitches < 4:
+        return ERR_FEW_UNIQUE_PITCHES, n_unique_pitches
+
+    pitch_range = max(pitches) - min(pitches)
     if pitch_range >= 36:
-        SP.print('Pitch range %d too large.' % pitch_range)
-        return False
-    return True
+        return ERR_PITCH_RANGE, pitch_range
+
+    if n_perc_notes > 2 * n_mel_notes:
+        return ERR_EXCESSIVE_PERCUSSION, n_perc_notes, n_mel_notes
+
+    # 40 is an arbitrary cutoff...
+    n_chords, n_diss_chords = dissonant_chords(mel_notes)
+    diss_frac = n_diss_chords / n_chords if n_chords else 0.0
+    if diss_frac >= 0.25 and n_chords > 40:
+        return ERR_DISSONANCE, diss_frac, n_chords
+    return None
+
+def print_encoding_errors(errors):
+    errors_per_type = sort_groupby(errors, lambda x: x[2][0])
+    for error_type, subsongs in errors_per_type:
+        subsongs = list(subsongs)
+        n_subsongs = len(subsongs)
+        if error_type == ERR_DISSONANCE:
+            header_part = 'WITH DISSONANCE'
+        elif error_type == ERR_FEW_MEL_NOTES:
+            header_part = 'WITH TO FEW MELODIC NOTES'
+        elif error_type == ERR_PARSE_ERROR:
+            header_part = 'WITH PARSE ERRORS'
+        elif error_type == ERR_PITCH_RANGE:
+            header_part = 'WITH TOO WIDE PITCH RANGES'
+        elif error_type == ERR_FEW_NOTES:
+            header_part = 'WITH TO FEW NOTES'
+        elif error_type == ERR_FEW_UNIQUE_PITCHES:
+            header_part = 'WITH TO FEW UNIQUE PITCHES'
+        elif error_type == ERR_EXCESSIVE_PERCUSSION:
+            header_part = 'WITH EXCESSIVE PERCUSSION'
+        else:
+            assert False
+        SP.header('%d SUBSONGS %s' % (n_subsongs, header_part))
+        for name, idx, err in subsongs:
+            if error_type == ERR_DISSONANCE:
+                args = name, idx, err[1], err[2]
+                fmt = '%-40s %3d %.2f %4d'
+            elif error_type == ERR_FEW_MEL_NOTES:
+                args = name, idx, err[1]
+                fmt = '%-40s %3d %4d'
+            elif error_type == ERR_PARSE_ERROR:
+                args = name, idx, err[1]
+                fmt = '%-40s %3d %s'
+            elif error_type == ERR_PITCH_RANGE:
+                args = name, idx, err[1]
+                fmt = '%-40s %3d %2d'
+            elif error_type == ERR_FEW_NOTES:
+                args = name, idx, err[1]
+                fmt = '%-40s %3d %4d'
+            elif error_type == ERR_FEW_UNIQUE_PITCHES:
+                args = name, idx, err[1]
+                fmt = '%-40s %3d %4d'
+            elif error_type == ERR_EXCESSIVE_PERCUSSION:
+                args = name, idx, err[1], err[2]
+                fmt = '%-40s %3d %4d %4d'
+            else:
+                assert False
+            SP.print(fmt % args)
+        SP.leave()
 
 def mod_file_to_codes_w_progress(i, n, file_path, code_type):
     SP.header('[ %4d / %4d ] PARSING %s' % (i, n, file_path))
     try:
         mod = load_file(file_path)
-    except UnsupportedModule:
+    except UnsupportedModule as e:
         SP.print('Unsupported module format.')
         SP.leave()
-        return
-    code_mod = CODE_MODULES[code_type]
+        err_arg = e.args[0] if e.args else e.__class__.__name__
+        return [(False, 0, (ERR_PARSE_ERROR, err_arg))]
 
+    code_mod = CODE_MODULES[code_type]
     subsongs = list(linearize_subsongs(mod, 1))
     volumes = [header.volume for header in mod.sample_headers]
+    parsed_subsongs = []
     for idx, (order, rows) in enumerate(subsongs):
         SP.header('SUBSONG %d' % idx)
-        SP.print('Table order: %s' % order)
-
         notes = rows_to_mod_notes(rows, volumes)
         percussion = guess_percussive_instruments(mod, notes)
         if notes:
             fmt = '%d rows, %d ms/row, percussion %s, %d notes'
             args = len(rows), notes[0].time_ms, percussion, len(notes)
             SP.print(fmt % args)
-        pitches = {n.pitch_idx for n in notes
-                   if n.sample_idx not in percussion}
-        min_pitch = min(pitches, default = 0)
-        code = list(code_mod.to_code(notes, percussion, min_pitch))
-        if not is_learnable(code_mod.metadata(code)):
-            SP.leave()
-            continue
-        if code_mod.is_transposable():
-            codes = code_mod.transpose_code(code)
+
+        err = training_error(notes, percussion)
+        if err:
+            parsed_subsongs.append((False, idx, err))
         else:
-            codes = [code]
-        SP.print('%d transpositions' % len(codes))
-        for code in codes:
-            yield code
+            pitches = {n.pitch_idx for n in notes
+                       if n.sample_idx not in percussion}
+            min_pitch = min(pitches, default = 0)
+            code = list(code_mod.to_code(notes, percussion, min_pitch))
+            if code_mod.is_transposable():
+                codes = code_mod.transpose_code(code)
+            else:
+                codes = [code]
+            SP.print('%d transpositions' % len(codes))
+            parsed_subsongs.append((True, idx, codes))
         SP.leave()
     SP.leave()
+    return parsed_subsongs
 
 def load_and_encode_mod_files(mod_files, code_type):
     encoder = CharEncoder()
@@ -85,18 +158,39 @@ def load_and_encode_mod_files(mod_files, code_type):
     end_tok = (INSN_END, 0)
     meta = []
     data = []
+    errors = []
     offset = 0
     for i, p, in enumerate(mod_files):
-        codes = list(mod_file_to_codes_w_progress(i + 1, n, p, code_type))
-        if not codes:
-            continue
+        parsed_subsongs = mod_file_to_codes_w_progress(i + 1, n,
+                                                       p, code_type)
+        # Handle errors
+        errors.extend([(p.name, idx, err)
+                       for (trainable, idx, err) in parsed_subsongs
+                       if not trainable])
+
+        # Filter those that parsed
+        codes = [codes for (trainable, _, codes) in parsed_subsongs
+                 if trainable]
+        # Flatten subsongs
+        codes = flatten(codes)
+        # Add end token
         code = flatten([c + [end_tok] for c in codes])
+
+        # Encode
         code = encoder.encode_chars(code, True)
         code = np.array(code, dtype = np.uint16)
+        n_code = len(code)
+
+        # Skip if empty
+        if n_code == 0:
+            continue
+
         data.append(code)
         meta.append((offset, p.name))
-        offset += len(code)
-    return encoder, meta, np.concatenate(data)
+        offset += n_code
+
+    print_encoding_errors(errors)
+    return encoder, meta, np.concatenate(data) if data else []
 
 def build_cache(path, shuffle_path, mods, code_type):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
@@ -244,7 +338,7 @@ if __name__ == '__main__':
     from pathlib import Path
     from sys import argv
     SP.enabled = True
-    _, _, td = load_training_data('pcode_abs', Path(argv[1]))
+    td, _, _ = load_training_data('dcode', Path(argv[1]))
     for i in range(3):
         ofs, frag = pick_song_fragment(td, 'random', 1000)
         td.save_code(frag, Path('test-%02d.mid' % i))

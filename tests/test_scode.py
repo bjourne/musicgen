@@ -4,7 +4,7 @@ from musicgen.code_utils import (INSN_REL_PITCH,
                                  guess_percussive_instruments)
 from musicgen.parser import load_file
 from musicgen.rows import linearize_subsongs, rows_to_mod_notes
-from musicgen.scode import metadata, to_code
+from musicgen.scode import to_code, to_notes
 
 TEST_PATH = Path() / 'tests' / 'mods'
 
@@ -16,15 +16,19 @@ def test_pitch_range():
     notes = rows_to_mod_notes(rows, volumes)
     percussion = guess_percussive_instruments(mod, notes)
     pitches = {n.pitch_idx for n in notes
-                   if n.sample_idx not in percussion}
+               if n.sample_idx not in percussion}
     min_pitch = min(pitches, default = 0)
 
     scode1 = list(to_code(notes, True, percussion, min_pitch))
-    meta1 = metadata(scode1)
+    notes1 = to_notes(scode1, True)
 
-    rel_pitches = [c for (c, _) in scode1 if c == INSN_REL_PITCH]
-    assert len(rel_pitches) > 0
+    # Undo what to_notes does...
+    for note in notes:
+        note.pitch_idx += min_pitch
 
     scode2 = list(to_code(notes, False, percussion, min_pitch))
-    meta2 = metadata(scode2)
-    assert meta1['pitch_range'] == meta2['pitch_range']
+    notes2 = to_notes(scode2, False)
+
+    pitches1 = {n.pitch_idx for n in notes1}
+    pitches2 = {n.pitch_idx for n in notes2}
+    assert pitches1 == pitches2

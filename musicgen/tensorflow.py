@@ -230,9 +230,9 @@ L_NORM_EPS = 1e-5
 N_HEAD = 12
 
 # Dropout rates
-EMBD_PDROP = 0.1
-ATTN_PDROP = 0.1
-RESID_PDROP = 0.1
+EMBD_PDROP = 0.15
+ATTN_PDROP = 0.15
+RESID_PDROP = 0.15
 
 def casual_attn_mask(nd, ns, dtype):
     i = tf.range(nd)[:, None]

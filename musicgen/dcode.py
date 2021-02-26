@@ -29,9 +29,6 @@ def to_code(mod, percussion, min_pitch):
 def to_notes(code):
     return pcode.to_notes(dcode_to_pcode(code), False)
 
-def metadata(code):
-    return pcode.metadata(list(dcode_to_pcode(code)))
-
 def is_transposable():
     return True
 

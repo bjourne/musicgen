@@ -13,62 +13,13 @@ Options:
 '''
 from collections import Counter
 from docopt import docopt
-from musicgen.analyze import sample_props
+from musicgen.analyze import dissonant_chords, sample_props
 from musicgen.parser import UnsupportedModule, load_file
 from musicgen.rows import linearize_subsongs, rows_to_mod_notes
 from musicgen.utils import SP, sort_groupby
 from pathlib import Path
 from termtables import print as tt_print
 from termtables.styles import ascii_booktabs, booktabs
-
-def chord_dissonance(classes):
-    for cl in classes:
-        left = (cl - 1) % 12
-        right = (cl + 1) % 12
-        if left in classes or right in classes:
-            return True
-    return False
-
-def note_dissonance(classes, last_classes):
-    for cl in classes:
-        left = (cl - 1) % 12
-        right = (cl + 1) % 12
-        if left in last_classes or right in last_classes:
-            return True
-    return False
-
-# def detect_dissonance(mel_notes):
-#     notes_per_row = sort_groupby(notes, lambda n: n.row_idx)
-#     for row, notes in notes_per_row:
-#         notes = list(notes)
-#         classes = {n.pitch_idx % 12 for n in notes}
-#         if len(classes) > 1:
-#             n_chords += 1
-#             if chord_dissonance(classes):
-#                 n_chord_diss += 1
-#         if last_classes:
-#             n_note_rows
-
-def is_dissonant(classes):
-    for cl in classes:
-        left = (cl - 1) % 12
-        right = (cl + 1) % 12
-        if left in classes or right in classes:
-            return True
-    return False
-
-def dissonant_chords(mel_notes):
-    notes_per_row = sort_groupby(mel_notes, lambda n: n.row_idx)
-    n_chords = 0
-    n_diss_chords = 0
-    for row, notes in notes_per_row:
-        notes = list(notes)
-        classes = frozenset([n.pitch_idx % 12 for n in notes])
-        if len(classes) > 1:
-            n_chords += 1
-            if is_dissonant(classes):
-                n_diss_chords += 1
-    return n_chords, n_diss_chords
 
 def main():
     args = docopt(__doc__, version = 'MIDI file generator 1.0')

@@ -88,10 +88,11 @@ def save_pickle(path, obj):
 def load_pickle_cache(cache_path, rebuild_fun):
     if not cache_path.exists():
         start = time()
-        SP.print('Building cache at %s.' % cache_path)
+        SP.header('BUILDING CACHE %s' % cache_path)
         save_pickle(cache_path, rebuild_fun())
         delta = time() - start
         SP.print('Cache built in %.2f seconds.' % delta)
+        SP.leave()
     else:
         SP.print('Loading cache from %s.' % cache_path)
     return load_pickle(cache_path)
