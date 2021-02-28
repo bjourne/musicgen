@@ -29,6 +29,7 @@ SampleProps = namedtuple('SampleProps', [
     'most_common_freq',
     'n_notes',
     'n_unique_notes',
+    'n_pitch_classes',
     'len_longest_repeating_seq',
     'size',
     'note_duration',
@@ -65,8 +66,9 @@ def is_percussive(n_pitches, n_unique, n_pitch_classes,
 
         # If the same note is repeated more than 40 times, it must be
         # percussive. This is ofc completely arbitrary.
-        if longest_rep >= 40:
+        if longest_rep >= 40: # and max_ringout < 1.0:
             return True
+
         # Another arbitrary one.
         if n_unique == 3 and max_ringout <= 0.11 and longest_rep >= 23:
             return True
@@ -124,10 +126,10 @@ def get_sample_props(mod, sample_idx, notes):
                             max_ringout, repeat_pct,
                             longest_rep,
                             most_common_freq)
-
     return SampleProps(most_common_freq,
                        len(notes),
                        n_unique,
+                       n_pitch_classes,
                        longest_rep,
                        size,
                        base_duration,
