@@ -41,7 +41,7 @@ def main():
     header = [
         '#',
         'MC freq',
-        'Notes', 'Uniq',
+        'Notes', 'Uniq', 'PCs',
         'Longest rep',
         'Size',
         'Dur',
@@ -52,7 +52,7 @@ def main():
     row_fmt = [
         '%2d',
         '%.2f',
-        '%3d', '%2d',
+        '%3d', '%2d', '%2d',
         '%3d', '%5d', '%2d',
         '%.2f',
         '%.2f',
@@ -61,7 +61,7 @@ def main():
 
     # Make a table
     rows = [(sample,) + p for (sample, p) in props.items()]
-    print_term_table(row_fmt, rows, header, 'rrrrrrrrrc')
+    print_term_table(row_fmt, rows, header, 'rrrrrrrrrrc')
 
     n_chords, n_diss_chords = dissonant_chords(mel_notes)
     diss_frac = n_diss_chords / n_chords if n_chords else 0.0
