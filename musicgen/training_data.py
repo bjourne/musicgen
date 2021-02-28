@@ -141,9 +141,13 @@ def mod_file_to_codes_w_progress(i, n, file_path, code_type):
             pitches = {n.pitch_idx for n in notes
                        if n.sample_idx not in percussion}
             min_pitch = min(pitches, default = 0)
-            code = list(code_mod.to_code(notes, percussion, min_pitch))
+
+            # Subtract min pitch
+            for n in notes:
+                n.pitch_idx -= min_pitch
+            code = list(code_mod.to_code(notes, percussion))
             if code_mod.is_transposable():
-                codes = code_mod.transpose_code(code)
+                codes = code_mod.code_transpositions(code)
             else:
                 codes = [code]
             SP.print('%d transpositions' % len(codes))
@@ -278,7 +282,8 @@ class TrainingData:
         if file_path.suffix == '.pickle':
             save_pickle(file_path, code)
         else:
-            notes = CODE_MODULES[self.code_type].to_notes(code)
+            code_mod = CODE_MODULES[self.code_type]
+            notes = code_mod.to_notes(code)
             notes_to_audio_file(notes, file_path, CODE_MIDI_MAPPING, True)
 
 def tally_tokens(encoder, data):
@@ -314,7 +319,7 @@ def find_name_by_offset(meta, seek):
         at = name
     return meta[-1][1]
 
-def pick_song_fragment(td, i, n):
+def pick_song_fragment(td, i, n, normalize_pitches):
     if i != 'random':
         i = int(i)
         frag = td.data[i:i + n]
@@ -331,6 +336,11 @@ def pick_song_fragment(td, i, n):
     name = find_name_by_offset(td.meta, i)
     fmt = 'Picked fragment at %d+%d of song %s.'
     SP.print(fmt % (i, len(frag), name))
+
+    if normalize_pitches:
+        code = td.encoder.decode_chars(frag)
+        code = CODE_MODULES[td.code_type].normalize_pitches(code)
+        frag = td.encoder.encode_chars(code, False)
     return i, frag
 
 if __name__ == '__main__':
@@ -338,7 +348,7 @@ if __name__ == '__main__':
     from pathlib import Path
     from sys import argv
     SP.enabled = True
-    td, _, _ = load_training_data('dcode', Path(argv[1]))
+    td, _, _ = load_training_data('pcode_abs', Path(argv[1]))
     for i in range(3):
-        ofs, frag = pick_song_fragment(td, 'random', 1000)
+        ofs, frag = pick_song_fragment(td, 'random', 1000, True)
         td.save_code(frag, Path('test-%02d.mid' % i))

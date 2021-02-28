@@ -50,11 +50,43 @@ def top_p_skew(P, top_p):
     P[prob_ixs[top_n:]] = np.finfo('float').eps
     return P / P.sum()
 
+def check_repeat(seq, length):
+    if not seq:
+        return None
+    if length == 1:
+        n = 1
+        while seq[-n] == seq[-1]:
+            n += 1
+        return n, seq[-1]
+    o = -(length - 1)
+    last = seq[o:]
+    to_find = seq[o - length: o]
+    if last != to_find[:-1]:
+        return None
+    n = 1
+    while seq[o - length: o] == to_find:
+        o -= length
+        n += 1
+    return n, to_find[-1]
+
 def sample_logits(logits, preds, end_ix, temps, top_ps):
     n_temps = len(temps)
     eps = np.finfo('float').eps
-
     Ps = softmax(logits).numpy()
+
+    # for i, pred in enumerate(preds):
+    #     for length in range(12, 100):
+    #         res = check_repeat(pred, length)
+    #         if not res:
+    #             continue
+    #         count, ix = res
+    #         if count > 4:
+    #             fmt = 'Clearing %s at %d with p=%.5f, length %d, %s'
+    #             SP.print(fmt % (ix, i, Ps[i, ix], length, res))
+    #             Ps[i, ix] = eps
+    #             print('Here!')
+    #             break
+
     print('%4d: Maxes: %s' % (len(preds[0]),
                                np.around(np.max(Ps, axis = 1), 4)))
 
@@ -165,7 +197,7 @@ def main():
                                        n_preds, False)
 
     n_frag = n_seed + n_samples
-    seed_ix, frag = pick_song_fragment(td, seed_ix, n_frag)
+    seed_ix, frag = pick_song_fragment(td, seed_ix, n_frag, True)
 
     seed, orig = frag[:n_seed], frag[n_seed:]
     seed = np.repeat(np.expand_dims(seed, 0), n_preds, axis = 0)

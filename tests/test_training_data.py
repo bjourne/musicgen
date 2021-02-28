@@ -1,5 +1,5 @@
 # Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
-from musicgen.code_utils import INSN_END
+from musicgen.code_utils import INSN_END, INSN_PITCH
 from musicgen.corpus import IndexedModule, load_index, save_index
 from musicgen.training_data import (ERR_FEW_UNIQUE_PITCHES,
                                     ERR_PARSE_ERROR,
@@ -38,6 +38,13 @@ def test_pcode_td():
     assert td.data.tolist().count(end_idx) == 5
     assert len(td.data) == 13424 * 5
 
+    code = td.encoder.decode_chars(td.data[:120])
+    code = [(c, a) for (c, a) in code if c == INSN_PITCH]
+    assert code == [('P', 24), ('P', 24),
+                    ('P', 27), ('P', 27),
+                    ('P', 24)]
+
+
 def test_histogram():
     td = TrainingData('pcode_abs')
     td.load_mod_file(TEST_PATH / 'im_a_hedgehog.mod')
@@ -52,7 +59,7 @@ def test_pick_song_fragment():
 
     end_tok = td.encoder.encode_char((INSN_END, 0), True)
     assert td.data[-1] == end_tok
-    i, fragment = pick_song_fragment(td, 'random', 1200)
+    i, fragment = pick_song_fragment(td, 'random', 1200, False)
     assert not end_tok in fragment
     assert len(fragment) == 1200
 

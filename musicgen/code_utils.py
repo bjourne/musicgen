@@ -4,18 +4,14 @@
 from musicgen.analyze import sample_props
 from musicgen.utils import SP
 
-# Fun melodic instruments:
-#   20 (organ)
-#   27 (jazz guitar)
-#  105 (sitar)
 CODE_MIDI_MAPPING = {
-    1 : [-1, 36, 4, 1.0],
+    1 : [-1, 31, 4, 1.0],
     2 : [-1, 40, 4, 1.0],
-    3 : [-1, 31, 4, 1.0],
-    4 : [1, 42, 3, 1.0]
-    #4 : [1, 54, 3, 1.0]
+    3 : [-1, 36, 4, 1.0],
+    4 : [1, 50, 3, 1.0]
 }
-BASE_ROW_TIME = 160
+
+BASE_ROW_TIME = 220
 
 # Standard instructions
 INSN_PITCH = 'P'
@@ -65,16 +61,23 @@ def fix_durations(notes):
         row_in_page = last_note.row_idx % 64
         last_note.duration = min(64 - row_in_page, 16)
 
-def transpose_code(code):
+def code_transpositions(code):
     pitches = [p for (c, p) in code if c == INSN_PITCH]
 
     n_versions = 36 - max(pitches)
     assert n_versions > 0
 
-    codes = [[(c, p) if c != 'P' else (c, p + i) for (c, p) in code]
+    codes = [[(c, p) if c != INSN_PITCH else (c, p + i)
+              for (c, p) in code]
              for i in range(n_versions)]
     for i, code in enumerate(codes):
         pitches = [p for (c, p) in code if c == INSN_PITCH]
         assert min(pitches) == i
         assert max(pitches) <= 35
     return codes
+
+def normalize_pitches(code):
+    pitches = [p for (c, p) in code if c == INSN_PITCH]
+    min_pitch = min(pitches, default = 0)
+    return [(c, p) if c != INSN_PITCH else (c, p - min_pitch)
+            for (c, p) in code]

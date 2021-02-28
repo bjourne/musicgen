@@ -59,13 +59,13 @@ def to_notes(pcode, rel_pitches):
         fix_durations(list(col))
     return notes
 
-def to_code(notes, rel_pitches, percussion, min_pitch):
+def to_code(notes, rel_pitches, percussion):
     def note_to_event(n):
         si = n.sample_idx
         at = 4 * n.row_idx + n.col_idx
         if si in percussion:
             return at, True, percussion[si]
-        return at, False, n.pitch_idx - min_pitch,
+        return at, False, n.pitch_idx
     notes = sorted([note_to_event(n) for n in notes])
 
     if rel_pitches:
@@ -126,7 +126,9 @@ def test_encode_decode(mod_file, rel_pitches):
         pitches = {n.pitch_idx for n in notes
                    if n.sample_idx not in percussion}
         min_pitch = min(pitches, default = 0)
-        code = to_code(notes, rel_pitches, percussion, min_pitch)
+        for n in notes:
+                n.pitch_idx -= min_pitch
+        code = list(to_code(notes, rel_pitches, percussion))
         notes = to_notes(code, rel_pitches)
         fname = 'test-%02d.mid' % idx
         notes_to_midi_file(notes, fname, CODE_MIDI_MAPPING)

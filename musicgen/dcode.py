@@ -20,8 +20,8 @@ def pcode_to_dcode(code):
     for ((cmd1, arg1), (cmd2, arg2)) in zip(code[::2], code[1::2]):
         yield cmd1 + '-' + cmd2, (arg1, arg2)
 
-def to_code(mod, percussion, min_pitch):
-    code = list(pcode.to_code(mod, False, percussion, min_pitch))
+def to_code(mod, percussion):
+    code = list(pcode.to_code(mod, False, percussion))
     if len(code) % 2 == 1:
         code.append((INSN_SILENCE, 1))
     return pcode_to_dcode(code)
@@ -32,10 +32,15 @@ def to_notes(code):
 def is_transposable():
     return True
 
-def transpose_code(code):
+def code_transpositions(code):
     code = list(dcode_to_pcode(code))
-    codes = code_utils.transpose_code(code)
+    codes = code_utils.code_transpositions(code)
     return [list(pcode_to_dcode(code)) for code in codes]
+
+def normalize_pitches(code):
+    code = list(dcode_to_pcode(code))
+    code = code_utils.normalize_pitches(code)
+    return list(pcode_to_dcode(code))
 
 def test_encode_decode(mod_file):
     from musicgen.code_utils import (CODE_MIDI_MAPPING,

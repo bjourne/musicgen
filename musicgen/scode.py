@@ -45,11 +45,7 @@ def mod_notes_to_scode(notes, percussion):
             yield INSN_PITCH, note.pitch_idx
         at = row_idx + 1
 
-def to_code(notes, rel_pitches, percussion, min_pitch):
-    # Align pitches to 0 base
-    for note in notes:
-        note.pitch_idx -= min_pitch
-
+def to_code(notes, rel_pitches, percussion):
     # No groupby.
     cols = [[n for n in notes if n.col_idx == i] for i in range(4)]
 
