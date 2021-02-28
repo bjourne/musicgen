@@ -31,7 +31,7 @@ def test_pitch_range():
     pitches2 = {n.pitch_idx for n in notes2}
     assert pitches1 == pitches2
 
-def test_pitch_hanges():
+def test_pitch_changes_in_to_code():
     mod = load_file(TEST_PATH / 'im_a_hedgehog.mod')
     subsongs = list(linearize_subsongs(mod, 1))
     rows = subsongs[0][1]
