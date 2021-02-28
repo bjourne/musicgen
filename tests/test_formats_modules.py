@@ -68,10 +68,6 @@ def test_percussive_samples():
     mod = load_file(TEST_PATH / 'mist-eek.mod')
     assert percussive_samples(mod) == {10, 11, 12}
 
-    # 1 and 2 are chord samples incorrectly classified as drums.
-    mod = load_file(TEST_PATH / 'afro_afro.mod')
-    assert percussive_samples(mod) == {1, 2, 5, 6, 7, 8}
-
     # This is a difficult one
     mod = load_file(TEST_PATH / 'zodiak_-_gasp.mod')
     assert percussive_samples(mod) == {3, 4}
@@ -79,6 +75,12 @@ def test_percussive_samples():
     # Percussive instruments are repeating...
     mod = load_file(TEST_PATH / 'alfrdchi_endofgame1.mod')
     assert percussive_samples(mod) == {1, 2, 3, 4, 5, 6, 8}
+
+    # 1 and 2 are chord samples incorrectly classified as drums.
+    mod = load_file(TEST_PATH / 'afro_afro.mod')
+    assert percussive_samples(mod) == {1, 2, 5, 6, 7, 8}
+
+
 
 def test_period_to_idx():
     idx = period_to_idx(679)
