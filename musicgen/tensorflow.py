@@ -50,15 +50,16 @@ def select_strategy():
     return strategy
 
 def sequence_to_samples(seq, length):
-    stride = length - 1
+    # stride = length - 1
     def split_input_target(chunk):
         return chunk[:-1], chunk[1:]
     def flatten_window(win):
         return win.batch(length + 1, drop_remainder = True)
     source = tf.constant(seq, dtype = tf.int32)
+    # Note that one element in each window overlaps.
     return Dataset    \
         .from_tensor_slices(source) \
-        .window(length + 1, stride, drop_remainder = True) \
+        .window(length + 1, length, drop_remainder = True) \
         .flat_map(flatten_window) \
         .map(split_input_target) \
         .shuffle(10000)
