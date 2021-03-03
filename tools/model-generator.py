@@ -20,6 +20,8 @@ Options:
     --seed-idx=<i>         seed index [default: random]
     --batch-size=<i>       size of training batches
     --file-format=<s>      output format [default: pickle]
+    --add-pause            insert a pause between the prompt and
+                           generated code
 """
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -50,45 +52,12 @@ def top_p_skew(P, top_p):
     P[prob_ixs[top_n:]] = np.finfo('float').eps
     return P / P.sum()
 
-def check_repeat(seq, length):
-    if not seq:
-        return None
-    if length == 1:
-        n = 1
-        while seq[-n] == seq[-1]:
-            n += 1
-        return n, seq[-1]
-    o = -(length - 1)
-    last = seq[o:]
-    to_find = seq[o - length: o]
-    if last != to_find[:-1]:
-        return None
-    n = 1
-    while seq[o - length: o] == to_find:
-        o -= length
-        n += 1
-    return n, to_find[-1]
-
-def sample_logits(logits, preds, end_ix, temps, top_ps):
+def sample_logits(logits, end_ix, temps, top_ps):
     n_temps = len(temps)
     eps = np.finfo('float').eps
     Ps = softmax(logits).numpy()
 
-    # for i, pred in enumerate(preds):
-    #     for length in range(12, 100):
-    #         res = check_repeat(pred, length)
-    #         if not res:
-    #             continue
-    #         count, ix = res
-    #         if count > 4:
-    #             fmt = 'Clearing %s at %d with p=%.5f, length %d, %s'
-    #             SP.print(fmt % (ix, i, Ps[i, ix], length, res))
-    #             Ps[i, ix] = eps
-    #             print('Here!')
-    #             break
-
-    print('%4d: Maxes: %s' % (len(preds[0]),
-                               np.around(np.max(Ps, axis = 1), 4)))
+    print('Maxes: %s' % np.around(np.max(Ps, axis = 1), 4))
 
     # Dont sample end tokens
     Ps[:, end_ix] = eps
@@ -106,55 +75,32 @@ def lstm_continuation(model, temps, top_ps, seed,
     for i in trange(seed.shape[1] - 1):
         model.predict(seed[:, i])
 
+    # The last item of the seed is saved so that it can be used to
+    # generate the first prediction.
     preds = np.expand_dims(seed[:, -1], 0)
-    n_temps = len(temps)
-    n_top_ps = len(top_ps)
-    n_preds = n_temps + n_top_ps
-    log_prob_sums = np.zeros(n_preds)
-    #log_probs = [0] * n_preds
-    # eps = np.finfo('float').eps
-
-    #for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
+    log_prob_sums = np.zeros(len(temps) + len(top_ps))
 
     SP.print('Predicting %d tokens.' % n_samples)
     for _ in range(n_samples):
         last_word = preds[-1]
         logits = model.predict(last_word)[:, -1, :]
-
-        ixs, log_probs = sample_logits(logits, preds, end_ix,
-                                       temps, top_ps)
+        ixs, log_probs = sample_logits(logits, end_ix, temps, top_ps)
         log_prob_sums += log_probs
-
-        # Ps = softmax(logits).numpy()
-        # # Dont sample end tokens
-        # Ps[:, end_ix] = eps
-        # for i in range(n_temps):
-        #     Ps[i] = temperature_skew(Ps[i], temps[i])
-        # for i in range(n_top_ps):
-        #     Ps[i + n_temps] = top_p_skew(Ps[i + n_temps], top_ps[i])
-        # ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
-        # for i, ix in enumerate(ixs):
-        #     log_probs[i] += np.log(Ps[i, ix])
         preds = np.vstack((preds, ixs))
-
-    SP.leave()
     # Skip the first element which is not actually a prediction.
     return preds.T[:,1:], log_prob_sums
 
 def transformer_continuation(model, temps, top_ps, seed, n_samples,
                              max_seq_len, end_ix):
-    seed = np.array(seed, dtype = np.int32)
+    # seed = np.array(seed, dtype = np.int32)
     log_prob_sums = np.zeros(len(temps) + len(top_ps))
-    preds = [[] for _ in temps + top_ps]
+    preds = np.empty((0, seed.shape[0]), int)
+
     SP.print('Predicting %d tokens.' % n_samples)
-    # for _ in trange(n_samples, unit = 'preds', mininterval = 0.5):
     for _ in range(n_samples):
         logits = model(seed, training = False)[:, -1, :]
-        ixs, log_probs = sample_logits(logits, preds, end_ix,
-                                       temps, top_ps)
-
-        for ix, pred in zip(ixs, preds):
-            pred.append(ix)
+        ixs, log_probs = sample_logits(logits, end_ix, temps, top_ps)
+        preds = np.vstack((preds, ixs))
         log_prob_sums += log_probs
 
         # Append column
@@ -162,7 +108,7 @@ def transformer_continuation(model, temps, top_ps, seed, n_samples,
         if seed.shape[1] >= max_seq_len:
             # Delete first column
             seed = seed[:, 1:]
-    return np.array(preds), log_prob_sums
+    return preds.T, log_prob_sums
 
 def main():
     # Prologue
@@ -172,18 +118,22 @@ def main():
 
     params = ModelParams.from_docopt_args(args)
     _, _, td = load_training_data(params.code_type, path)
+
     temps = [0.90, 0.95, 1.0, 1.01, 1.02]
-    top_ps = [0.87, 0.90, 0.94, 0.98, 0.99]
+
+    # For GPT-2 0.87 and 0.90 is too low
+    # top_ps = [0.87, 0.90, 0.94, 0.98, 0.99]
+    top_ps = [0.92, 0.95, 0.98, 0.99, 0.999]
 
     n_temps = len(temps)
     n_top_ps = len(top_ps)
     n_preds = n_temps + n_top_ps
-    n_samples = 500
-    n_seed = 32
+
+    n_samples = 800
+    n_seed = 64
 
     enc = td.encoder
     end_ix = td.encoder.encode_char((INSN_END, 0), False)
-    pause = td.encoder.encode_chars(td.pause_code(), False)
 
     vocab_size = len(enc.ix2ch)
     seed_ix = args['--seed-idx']
@@ -214,8 +164,13 @@ def main():
     seqs = np.vstack((seqs, orig))
     seed = np.vstack((seed, seed[0]))
 
-    join = np.repeat(np.expand_dims(pause, 0), len(seqs), axis = 0)
-    seqs = np.hstack((seed, join, seqs))
+    # Maybe add a pause
+    if args['--add-pause']:
+        pause = td.encoder.encode_chars(td.pause_code(), False)
+        join = np.repeat(np.expand_dims(pause, 0), len(seqs), axis = 0)
+        seqs = np.hstack((seed, join, seqs))
+    else:
+        seqs = np.hstack((seed, seqs))
 
     prefix = '%s-%s-%09d' % (td.code_type, mtype, seed_ix)
     file_names = ['%s-t%.3f' % (prefix, t) for t in temps]
