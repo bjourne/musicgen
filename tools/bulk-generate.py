@@ -118,9 +118,20 @@ def main():
                 for _ in range(n_clips)]
     offsets = load_pickle_cache(schedule_path, build_schedule)
 
+    # Filter out those that already exist
+    output_path = root_path / 'bulk-generated'
+    existing = [e.stem.split('-')[:3]
+                for e in output_path.glob('*.pickle.gz')]
+    existing = [e for e in existing if len(e) == 3]
+    existing = {(int(o), c, n) for (o, c, n) in existing}
+    offsets = [o for o in offsets
+               if not (o, g['code-type'], g['network-type']) in existing]
+
+    n_offsets = len(offsets)
+    SP.print('Generating %d clips.' % n_offsets)
     # Need to split up the load since 32 is the maximum number of
     # sequences that can be generated in parallel.
-    for i in range(0, len(offsets), 32):
+    for i in range(0, n_offsets, 32):
         job = offsets[i:i+32]
         bulk_generate(g, root_path, job, td, n_prompt, n_generate)
 
