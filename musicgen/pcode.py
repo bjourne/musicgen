@@ -15,7 +15,7 @@ from musicgen.utils import SP, sort_groupby
 def pause():
     return [(INSN_SILENCE, 16)] * 4
 
-def to_notes(pcode, rel_pitches):
+def to_notes_without_tempo(pcode, rel_pitches):
     if rel_pitches:
         at_pitch = guess_initial_pitch(pcode)
 
@@ -42,16 +42,22 @@ def to_notes(pcode, rel_pitches):
             at += arg
         else:
             assert False
+    return notes
 
-    # Guess and set row time
+def estimate_row_time(code, rel_pitches):
+    notes = to_notes_without_tempo(code, rel_pitches)
     row_indices = {n.row_idx for n in notes}
     max_row = max(row_indices, default = 1)
-    row_time_ms = int(BASE_ROW_TIME * len(row_indices) / max_row)
-    for n in notes:
-        n.time_ms = row_time_ms
+    return int(BASE_ROW_TIME * len(row_indices) / max_row)
 
-    fmt = 'Rel pitches: %s, guessed row time: %s.'
-    SP.print(fmt % (rel_pitches, row_time_ms))
+def to_notes(pcode, rel_pitches, row_time):
+    notes = to_notes_without_tempo(pcode, rel_pitches)
+
+    for n in notes:
+        n.time_ms = row_time
+
+    fmt = 'Rel pitches: %s, row time: %s.'
+    SP.print(fmt % (rel_pitches, row_time))
 
     # Fix durations
     cols = sort_groupby(notes, lambda n: n.col_idx)

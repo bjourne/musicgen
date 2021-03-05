@@ -27,12 +27,13 @@ def main():
     files = args['<files>']
     file_paths = [Path(f) for f in files]
     format = args['--format']
-
     for file_path in file_paths:
-        obj = load_pickle(file_path)
-
+        code = load_pickle(file_path)
         code_type = file_path.name.split('-')[1]
-        notes = CODE_MODULES[code_type].to_notes(obj)
+        code_mod = CODE_MODULES[code_type]
+
+        row_time = code_mod.estimate_row_time(code[:64])
+        notes = code_mod.to_notes(code, row_time)
 
         prefix = '.'.join(str(file_path).split('.')[:-2])
         output_name = '%s.%s' % (prefix, format)
