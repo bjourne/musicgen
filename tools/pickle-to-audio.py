@@ -10,6 +10,7 @@ Usage:
 Options:
     -h --help              show this screen
     -v --verbose           print more output
+    --n-prompt=<i>         number of tokens in the prompt
     --format=<fmt>         output format [default: mid]
 '''
 from docopt import docopt
@@ -26,13 +27,17 @@ def main():
     SP.enabled = args['--verbose']
     files = args['<files>']
     file_paths = [Path(f) for f in files]
+
+    # Prompt is used to estimate tempo
+    n_prompt = int(args['--n-prompt'])
+
     format = args['--format']
     for file_path in file_paths:
         code = load_pickle(file_path)
         code_type = file_path.name.split('-')[1]
         code_mod = CODE_MODULES[code_type]
 
-        row_time = code_mod.estimate_row_time(code[:64])
+        row_time = code_mod.estimate_row_time(code[:n_prompt])
         notes = code_mod.to_notes(code, row_time)
 
         prefix = '.'.join(str(file_path).split('.')[:-2])
