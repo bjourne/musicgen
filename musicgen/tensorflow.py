@@ -14,8 +14,9 @@ from tensorflow.keras.layers import *
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.optimizers import *
 from tensorflow.nn import softmax
-from tensorflow.tpu.experimental import (initialize_tpu_system,
-                                         shutdown_tpu_system)
+from tensorflow.tpu.experimental import initialize_tpu_system
+from tqdm import trange
+
 import numpy as np
 import tensorflow as tf
 
@@ -63,38 +64,6 @@ def sequence_to_samples(seq, length):
         .flat_map(flatten_window) \
         .map(split_input_target) \
         .shuffle(10000)
-
-def generate_sequences(model, temps, seed, length, excluded):
-    batch_size = len(temps)
-
-    # Make temps into a row vector
-    temps = np.array(temps)[:,None]
-
-    # Priming the model
-    for i in range(seed.shape[1] - 1):
-        model.predict(seed[:, i:i + 1])
-
-    preds = [seed[:, -1:]]
-    eps = np.finfo('float').eps
-    for _ in range(length):
-        last_word = preds[-1]
-        Ps = model.predict(last_word)[:, 0, :]
-
-        # Assign a very low probability to tokens to be avoided.
-        Ps[:, excluded] = eps
-
-        # Weigh probs according to temps
-        Ps = np.exp(np.log(Ps) / temps)
-
-        # Normalize
-        Ps = (Ps.T / Ps.sum(axis = 1)).T
-
-        next_idx = [np.random.choice(len(P), p = P) for P in Ps]
-        preds.append(np.asarray(next_idx, dtype = np.int32))
-
-    SP.leave()
-    return [[int(preds[j][i]) for j in range(length)]
-            for i in range(batch_size)]
 
 def compute_and_apply_gradients(model, x, y):
     with tf.GradientTape() as tape:
@@ -411,59 +380,173 @@ class GPT2(Model):
 
         return self.wte(hs, mode = 'linear')
 
-# Incredibly convoluted code follows. Note that the batch size is the
-# number of sequences to generate and not the batch size the model was
-# trained with.
-
-def compiled_model_from_params(path, params, vocab_size,
-                               batch_size, is_training):
-    mtype = params.model_type
-    strategy = select_strategy()
-    if mtype == 'transformer':
-        with strategy.scope():
-            model = transformer(vocab_size, 128, 2048, 0.2, 8, 16,
-                                params.seq_len, is_training)
-            opt = RMSprop(learning_rate = params.lr)
-    elif mtype == 'gpt2':
-        with strategy.scope():
-            model = GPT2(vocab_size)
-            # 3e-5
-            opt = Adam(learning_rate=params.lr, epsilon=1e-08)
+def file_stem(g):
+    if g['network-type'] == 'lstm':
+        args = (g['code-type'], g['network-type'],
+                g['batch-size'], g['learning-rate'],
+                g['sequence-length'],
+                g['dropout'], g['recurrent-dropout'],
+                g['embedding-size'],
+                g['lstm1-units'], g['lstm2-units'])
+        fmt = '%s-%s-%04d-%.5f-%03d-%.2f-%.2f-%03d-%04d-%04d'
+    elif g['network-type'] == 'gpt2':
+        args = (g['code-type'], g['network-type'],
+                g['batch-size'], g['learning-rate'],
+                g['sequence-length'])
+        fmt = '%s-%s-%04d-%.5f-%03d'
+    elif g['network-type'] == 'transformer':
+        args = (g['code-type'], g['network-type'],
+                g['batch-size'], g['learning-rate'],
+                g['sequence-length'])
+        fmt = '%s-%s-%04d-%.5f-%03d'
     else:
-        opt = RMSprop(learning_rate = params.lr)
-        if not is_training:
+        assert False
+    return fmt % args
+
+def weights_file(g):
+    return 'weights-%s.h5' % file_stem(g)
+
+def log_file(g):
+    return 'log-%s.log' % file_stem(g)
+
+def load_training_model(g, root_path, vocab_size):
+    with select_strategy().scope():
+        if g['network-type'] == 'transformer':
+            model = transformer(vocab_size, 128, 2048, 0.2, 8, 16,
+                                g['sequence-length'], True)
+            opt = RMSprop(learning_rate = g['learning-rate'])
+        elif g['network-type'] == 'lstm':
             model = lstm_model(vocab_size,
-                               params.type_params.emb_size,
-                               params.type_params.lstm1_units,
-                               params.type_params.lstm2_units,
-                               0.0, 0.0,
-                               not is_training, batch_size)
+                               g['embedding-size'],
+                               g['lstm1-units'],
+                               g['lstm2-units'],
+                               g['dropout'],
+                               g['recurrent-dropout'],
+                               False, g['batch-size'])
+            opt = RMSprop(learning_rate = g['learning-rate'])
+        elif g['network-type'] == 'gpt2':
+            model = GPT2(vocab_size)
+            opt = Adam(learning_rate = g['learning-rate'], epsilon=1e-08)
         else:
-            with strategy.scope():
-                model = lstm_model(vocab_size,
-                                   params.type_params.emb_size,
-                                   params.type_params.lstm1_units,
-                                   params.type_params.lstm2_units,
-                                   params.type_params.dropout,
-                                   params.type_params.rec_dropout,
-                                   not is_training, batch_size)
+            assert False
+        loss_fn = SparseCategoricalCrossentropy(from_logits = True)
+        metrics = ['sparse_categorical_accuracy']
+        model.compile(optimizer = opt, loss = loss_fn,
+                      metrics = metrics)
+        model(tf.constant([[0]]))
 
-    if mtype in ('transformer', 'gpt2') or is_training:
-        with strategy.scope():
-            loss_fn = SparseCategoricalCrossentropy(from_logits = True)
-            metrics = ['sparse_categorical_accuracy']
-            model.compile(optimizer = opt, loss = loss_fn,
-                          metrics = metrics)
-            model(tf.constant([[0]]))
-
-    weights_path = path / params.weights_file()
+    weights_path = root_path / 'weights' / weights_file(g)
     if weights_path.exists():
         SP.print('Loading weights from %s...' % weights_path)
         model.load_weights(str(weights_path))
     else:
         SP.print('Weights file %s not found.' % weights_path)
-    if not is_training:
-        assert weights_path.exists()
     model.reset_states()
     model.summary()
     return model
+
+def load_generating_model(g, root_path, vocab_size, batch_size):
+    if g['network-type'] == 'lstm':
+        model = lstm_model(vocab_size,
+                           g['embedding-size'],
+                           g['lstm1-units'],
+                           g['lstm2-units'],
+                           0.0, 0.0,
+                           True, batch_size)
+    elif g['network-type'] == 'gpt2':
+        # Some cargo culting here
+        strategy = select_strategy()
+        with strategy.scope():
+            model = GPT2(vocab_size)
+            model.compile()
+        model(tf.constant([[0]]))
+    weights_path = root_path / 'weights' / weights_file(g)
+    assert weights_path.exists()
+    model.load_weights(str(weights_path))
+    model.reset_states()
+    model.summary()
+    return model
+
+def temperature_skew(P, temp):
+    P = np.exp(np.log(P) / temp)
+    return P / P.sum()
+
+def top_p_skew(P, top_p):
+    prob_ixs = np.argsort(-P)
+    PC = np.cumsum(P[prob_ixs])
+    top_n = len(PC[PC <= top_p]) + 1
+
+    # Clear the prob of those who didn't make it.
+    P[prob_ixs[top_n:]] = np.finfo('float').eps
+    return P / P.sum()
+
+def skew_distribution(P, sampling_method):
+    type, param = sampling_method
+    if type == 'top-p':
+        return top_p_skew(P, param)
+    elif type == 'temperature':
+        return temperature_skew(P, param)
+    else:
+        assert False
+
+def sample_logits(logits, banned_ixs, skews):
+    eps = np.finfo('float').eps
+    Ps = softmax(logits).numpy()
+
+    # Dont sample any "banned" tokens
+    for ix in banned_ixs:
+        Ps[:, ix] = eps
+
+    for i in range(Ps.shape[0]):
+        Ps[i] = skew_distribution(Ps[i], skews[i])
+    ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
+    return ixs, [np.log(Ps[i, ix]) for i, ix in enumerate(ixs)]
+
+def generate_sequences_normal(model, n_generate, banned_ixs, prompt, skews,
+                              max_seq_len):
+    log_prob_sums = np.zeros(len(skews))
+    preds = np.empty((0, prompt.shape[0]), int)
+
+    SP.print('Generating %d tokens.' % n_generate)
+    for _ in trange(n_generate):
+        logits = model(prompt, training = False)[:, -1, :]
+        ixs, log_probs = sample_logits(logits, banned_ixs, skews)
+        preds = np.vstack((preds, ixs))
+        log_prob_sums += log_probs
+
+        # Append column
+        prompt = np.append(prompt, np.expand_dims(ixs, 1), axis = 1)
+        if prompt.shape[1] >= max_seq_len:
+            # Delete first column
+            prompt = prompt[:, 1:]
+    return preds.T, log_prob_sums
+
+def generate_sequences_lstm(model, n_generate, banned_ixs,
+                            prompt, skews):
+    for i in trange(prompt.shape[1] - 1):
+        model.predict(prompt[:, i])
+
+    # The last item of the prompt is saved so that it can be used to
+    # generate the first prediction.
+    preds = np.expand_dims(prompt[:, -1], 0)
+    log_prob_sums = np.zeros(len(skews))
+
+    SP.print('Generating %d tokens.' % n_generate)
+    for _ in trange(n_generate):
+        logits = model.predict(preds[-1])[:, -1, :]
+        ixs, log_probs = sample_logits(logits, banned_ixs, skews)
+        log_prob_sums += log_probs
+        preds = np.vstack((preds, ixs))
+    # Skip the first element which is not actually a prediction.
+    return preds.T[:,1:], log_prob_sums
+
+
+def generate_sequences(g, model, prompt, n_generate, banned_ixs, skews):
+    if g['network-type'] == 'lstm':
+        return generate_sequences_lstm(model, n_generate,
+                                       banned_ixs,
+                                       prompt, skews)
+    else:
+        return generate_sequences_normal(model, n_generate,
+                                         banned_ixs, prompt, skews,
+                                         g['sequence-length'])

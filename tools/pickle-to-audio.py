@@ -10,8 +10,10 @@ Usage:
 Options:
     -h --help              show this screen
     -v --verbose           print more output
+    --format=<fmt>         output format [default: mid]
 '''
 from docopt import docopt
+from musicgen.code_generators import get_code_generator
 from musicgen.code_utils import CODE_MIDI_MAPPING
 from musicgen.generation import notes_to_audio_file
 from musicgen.utils import SP, load_pickle
@@ -24,16 +26,21 @@ def main():
     SP.enabled = args['--verbose']
     files = args['<files>']
     file_paths = [Path(f) for f in files]
+    format = args['--format']
 
     for file_path in file_paths:
-        code_type = file_path.name.split('-')[0]
         obj = load_pickle(file_path)
+
+        code_type = file_path.name.split('-')[1]
         notes = CODE_MODULES[code_type].to_notes(obj)
-        dir = file_path.parent
-        stem = file_path.stem
-        output_file = dir / (stem + '.mid')
-        SP.print('Creating %s.' %  output_file)
-        notes_to_audio_file(notes, output_file, CODE_MIDI_MAPPING, False)
+
+        prefix = '.'.join(str(file_path).split('.')[:-2])
+        output_name = '%s.%s' % (prefix, format)
+        output_path = file_path.parent / output_name
+
+        SP.print('Creating %s.' %  output_path)
+        stereo = (format == 'mp3')
+        notes_to_audio_file(notes, output_path, CODE_MIDI_MAPPING, stereo)
 
 if __name__ == '__main__':
     main()

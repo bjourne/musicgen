@@ -3,26 +3,18 @@
 Model stats
 ===========
 Usage:
-    model-stats.py [options] <code-type> lstm <corpus-path>
-        --emb-size=<i>
-        --dropout=<f> --rec-dropout=<f>
-        --lstm1-units=<i> --lstm2-units=<i>
-    model-stats.py [options] <code-type> transformer <corpus-path>
-    model-stats.py [options] <code-type> gpt2 <corpus-path>
+    model-stats.py [options] <root-path> <model>
 
 Options:
     -h --help              show this screen
     -v --verbose           print more output
-    --lr=<f>               learning rate
-    --epochs=<i>           epochs to train for
-    --seq-len=<i>          training sequence length
-    --batch-size=<i>       size of training batches
 """
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
-from musicgen.params import ModelParams
+from musicgen.code_generators import get_code_generator
+from musicgen.tensorflow import log_file, file_stem
 from musicgen.training_data import TrainingData, tally_tokens
 from musicgen.utils import SP
 from pathlib import Path
@@ -65,7 +57,7 @@ def token_distribution_plot(td, png_path):
                        rotation_mode = 'anchor',
                        ha = 'right')
     tot_fmt = '{:,}'.format(sum(values))
-    ax.set(xlabel = 'token', ylabel = 'freq.') #, title = title)
+    ax.set(xlabel = 'token', ylabel = 'freq.')
     ax.grid()
     fig.savefig(png_path)
 
@@ -73,19 +65,24 @@ def main():
     # Prologue
     args = docopt(__doc__, version = 'Model stats 1.0')
     SP.enabled = args['--verbose']
-    path = Path(args['<corpus-path>'])
+    root_path = Path(args['<root-path>'])
 
-    # Hyperparameters
-    params = ModelParams.from_docopt_args(args)
+    # Kind of code
+    g = get_code_generator(args['<model>'])
 
-    td = TrainingData(params.code_type)
-    td.load_disk_cache(path, 150)
+    td = TrainingData(g['code-type'])
+    td.load_disk_cache(root_path, 150)
 
-    png_path = path / 'tokens.png'
+    stats_path = root_path / 'stats'
+    stats_path.mkdir(exist_ok = True)
+
+    png_path = stats_path / ('tokens-%s.png' % g['code-type'])
     token_distribution_plot(td, png_path)
 
-    log_path = path / params.log_file()
-    png_path = path / ('loss-%s.png' % params.to_string())
+    weights_dir = root_path / 'weights'
+    log_path = weights_dir / log_file(g)
+
+    png_path = stats_path / ('loss-%s.png' % file_stem(g))
     loss_plot(log_path, png_path)
 
 if __name__ == '__main__':

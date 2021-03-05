@@ -277,15 +277,6 @@ class TrainingData:
             td.meta = [(o - base_ofs, n) for (o, n) in td.meta]
         return tds
 
-    def save_code(self, seq, file_path):
-        code = self.encoder.decode_chars(seq)
-        if file_path.suffix == '.pickle':
-            save_pickle(file_path, code)
-        else:
-            code_mod = CODE_MODULES[self.code_type]
-            notes = code_mod.to_notes(code)
-            notes_to_audio_file(notes, file_path, CODE_MIDI_MAPPING, True)
-
 def tally_tokens(encoder, data):
     unique, counts = np.unique(data, return_counts = True)
     ch_counts = [(encoder.decode_char(ix), cnt) for (ix, cnt) in
@@ -342,13 +333,3 @@ def pick_song_fragment(td, i, n, normalize_pitches):
         code = CODE_MODULES[td.code_type].normalize_pitches(code)
         frag = td.encoder.encode_chars(code, False)
     return i, frag
-
-if __name__ == '__main__':
-    from random import choice
-    from pathlib import Path
-    from sys import argv
-    SP.enabled = True
-    td, _, _ = load_training_data('pcode_abs', Path(argv[1]))
-    for i in range(3):
-        ofs, frag = pick_song_fragment(td, 'random', 1000, True)
-        td.save_code(frag, Path('test-%02d.mid' % i))

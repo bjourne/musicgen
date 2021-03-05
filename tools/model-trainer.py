@@ -4,37 +4,24 @@ Model training for music generation
 ===================================
 
 Usage:
-    model-trainer.py [options] <code-type> lstm
-        <corpus-path> --emb-size=<i>
-        --dropout=<f> --rec-dropout=<f>
-        --lstm1-units=<i> --lstm2-units=<i>
-    model-trainer.py [options]
-        <code-type> transformer <corpus-path>
-    model-trainer.py [options]
-        <code-type> gpt2 <corpus-path>
+    model-trainer.py [options] <root-path> <model>
 
 Options:
     -h --help              show this screen
     -v --verbose           print more output
-    --lr=<f>               learning rate
-    --epochs=<i>           epochs to train for
-    --seq-len=<i>          training sequence length
-    --batch-size=<i>       batch size
 """
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
-from musicgen.params import ModelParams
-from musicgen.tensorflow import (compiled_model_from_params,
+from musicgen.code_generators import get_code_generator
+from musicgen.tensorflow import (load_training_model,
+                                 log_file, weights_file,
                                  sequence_to_samples)
 from musicgen.training_data import load_training_data
 from musicgen.utils import SP
 from pathlib import Path
 from tensorflow.keras.callbacks import *
-
-import numpy as np
-import tensorflow as tf
 
 def training_data_to_dataset(td, seq_len, batch_size):
     ds = sequence_to_samples(td.data, seq_len)
@@ -44,31 +31,34 @@ def main():
     # Prologue
     args = docopt(__doc__, version = 'Train MOD model 1.0')
     SP.enabled = args['--verbose']
-    path = Path(args['<corpus-path>'])
+    root_path = Path(args['<root-path>'])
 
-    # Hyperparameters
-    params = ModelParams.from_docopt_args(args)
-    seq_len = params.seq_len
-    batch_size = params.batch_size
+    # Kind of code
+    g = get_code_generator(args['<model>'])
 
-    train, valid, test = load_training_data(params.code_type, path)
+    # Load training data
+    train, valid, test = load_training_data(g['code-type'], root_path)
     vocab_size = len(train.encoder.ix2ch)
 
     args = len(train.meta), len(valid.meta), len(test.meta)
     SP.print('Train/valid/test split %d/%d/%d' % args)
 
-    weights_dir = path / 'weights'
+    # Load the training model
+    model = load_training_model(g, root_path, vocab_size)
+
+    # Logging
+    weights_dir = root_path / 'weights'
     weights_dir.mkdir(exist_ok = True)
-    weights_path = weights_dir / params.weights_file()
-    log_path = weights_dir / params.log_file()
+
+    # Logging
+    log_path = weights_dir / log_file(g)
     def log_losses(epoch, logs):
         with open(log_path, 'at') as outf:
             outf.write('%d %.5f %.5f\n'
                        % (epoch, logs['loss'], logs['val_loss']))
-    model = compiled_model_from_params(weights_dir, params, vocab_size,
-                                       None, True)
-
     cb_epoch_end = LambdaCallback(on_epoch_end = log_losses)
+
+    weights_path = weights_dir / weights_file(g)
     cb_best = ModelCheckpoint(
         str(weights_path),
         monitor = 'val_loss',
@@ -79,16 +69,18 @@ def main():
     stopping = EarlyStopping(patience = 30, verbose = 1)
     reduce_lr = ReduceLROnPlateau(
         factor = 0.2, patience = 8,
-        min_lr = params.lr / 100,
+        min_lr = g['learning-rate'] / 100,
         verbose = 1)
     callbacks = [reduce_lr, cb_best, stopping, cb_epoch_end]
 
     SP.print('Batching samples...')
-    train_ds = training_data_to_dataset(train, seq_len, batch_size)
-    valid_ds = training_data_to_dataset(valid, seq_len, batch_size)
+    train_ds = training_data_to_dataset(
+        train, g['sequence-length'], g['batch-size'])
+    valid_ds = training_data_to_dataset(
+        valid, g['sequence-length'], g['batch-size'])
     model.fit(x = train_ds,
               validation_data = valid_ds,
-              epochs = params.epochs, callbacks = callbacks,
+              epochs = 200, callbacks = callbacks,
               verbose = 1)
 
 if __name__ == '__main__':
