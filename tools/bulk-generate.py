@@ -52,8 +52,7 @@ def bulk_generate(g, root_path, offsets, td, n_prompt, n_generate):
         log_probs = [0] * n_clips
     elif g['network-type'] == 'random':
         ixs = [ix for ix in td.encoder.ix2ch if ix != end_ix]
-        seqs = [choices(ixs, k = n_generate) for _ in offsets]
-        seqs = np.array(generated)
+        seqs = np.array([choices(ixs, k = n_generate) for _ in offsets])
         log_probs = [0] * n_clips
     else:
         assert False
@@ -129,10 +128,12 @@ def main():
 
     n_offsets = len(offsets)
     SP.print('Generating %d clips.' % n_offsets)
-    # Need to split up the load since 32 is the maximum number of
-    # sequences that can be generated in parallel.
-    for i in range(0, n_offsets, 32):
-        job = offsets[i:i+32]
+
+    # Splitting the load into chunks of 16. To many sequences at once
+    # either exhausts the memory or times out Google Colab.
+    job_size = 16
+    for i in range(0, n_offsets, job_size):
+        job = offsets[i:i+job_size]
         bulk_generate(g, root_path, job, td, n_prompt, n_generate)
 
 if __name__ == '__main__':
