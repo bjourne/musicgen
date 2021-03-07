@@ -7,7 +7,7 @@ from musicgen.training_data import (ERR_FEW_NOTES,
                                     training_error)
 
 def error_for_pcode(pcode, rel_pitches):
-    notes = to_notes(pcode, rel_pitches)
+    notes = to_notes(pcode, rel_pitches, 200)
     return training_error(notes, {})
 
 def test_abs_is_learnable():
@@ -45,5 +45,5 @@ def test_to_code():
     # Don't convert pitches
     notes = [ModNote(0, 0, 1, 10, 1.0, 0.0),
              ModNote(0, 1, 1, 50, 1.0, 0.0)]
-    code = list(to_code(notes, False, {}, 0))
+    code = list(to_code(notes, False, {}))
     assert code == [(INSN_PITCH, 10), (INSN_PITCH, 50)]

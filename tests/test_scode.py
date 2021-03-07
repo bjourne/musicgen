@@ -21,10 +21,10 @@ def test_pitch_range():
     for note in notes:
         note.pitch_idx -= min_pitch
 
-    scode1 = list(to_code(notes, True, percussion, min_pitch))
+    scode1 = list(to_code(notes, True, percussion))
     notes1 = to_notes(scode1, True)
 
-    scode2 = list(to_code(notes, False, percussion, min_pitch))
+    scode2 = list(to_code(notes, False, percussion))
     notes2 = to_notes(scode2, False)
 
     pitches1 = {n.pitch_idx for n in notes1}
@@ -40,6 +40,6 @@ def test_pitch_changes_in_to_code():
 
     pitches_before = [n.pitch_idx for n in notes]
 
-    scode1 = list(to_code(notes, True, {}, 33))
+    scode1 = list(to_code(notes, True, {}))
     pitches_after = [n.pitch_idx for n in notes]
     assert pitches_before == pitches_after
