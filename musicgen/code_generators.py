@@ -33,6 +33,20 @@ CODE_GENERATORS = {
         'sequence-length' : 512,
         'sampling-method' : ('top-p', 0.98)
     },
+    'gpt2-dcode-1' : {
+        'code-type' : 'dcode',
+        'network-type' : 'gpt2',
+
+        'batch-size' : 64,
+        'learning-rate' : 0.00001,
+        'sequence-length' : 512,
+        'sampling-method' : ('top-p', 0.98)
+    },
+    'orig-dcode' : {
+        'code-type' : 'dcode',
+        'network-type' : 'original',
+        'sampling-method' : ('original', 0)
+    },
     'orig-pcode' : {
         'code-type' : 'pcode_abs',
         'network-type' : 'original',
