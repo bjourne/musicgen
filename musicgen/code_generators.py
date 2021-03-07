@@ -31,7 +31,7 @@ CODE_GENERATORS = {
         'batch-size' : 64,
         'learning-rate' : 0.00001,
         'sequence-length' : 512,
-        'sampling-method' : ('top-p', 0.98)
+        'sampling-method' : ('top-p', 0.99)
     },
     'gpt2-dcode-1' : {
         'code-type' : 'dcode',
