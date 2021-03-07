@@ -30,14 +30,21 @@ def main():
 
     # Prompt is used to estimate tempo
     n_prompt = int(args['--n-prompt'])
+    assert n_prompt % 2 == 0
 
     format = args['--format']
     for file_path in file_paths:
         code = load_pickle(file_path)
-        code_type = file_path.name.split('-')[1]
+        code_type = file_path.name.split('-')[2]
         code_mod = CODE_MODULES[code_type]
 
-        row_time = code_mod.estimate_row_time(code[:n_prompt])
+        # Halve the code length to use for tempo estimation in case
+        # dcode is used since its encoding is twice as dense.
+        if code_type == 'dcode':
+            n_estimate = n_prompt // 2
+        else:
+            n_estimate = n_prompt
+        row_time = code_mod.estimate_row_time(code[:n_estimate])
         notes = code_mod.to_notes(code, row_time)
 
         prefix = '.'.join(str(file_path).split('.')[:-2])
