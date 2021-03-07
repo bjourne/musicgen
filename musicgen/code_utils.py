@@ -8,10 +8,10 @@ CODE_MIDI_MAPPING = {
     1 : [-1, 31, 4, 1.0],
     2 : [-1, 40, 4, 1.0],
     3 : [-1, 36, 4, 1.0],
-    4 : [1, 50, 3, 1.0]
+    4 : [1, 54, 3, 1.0]
 }
 
-BASE_ROW_TIME = 220
+BASE_ROW_TIME = 210
 
 # Standard instructions
 INSN_PITCH = 'P'
