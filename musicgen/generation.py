@@ -144,13 +144,13 @@ def notes_to_audio_file(notes, audio_file, midi_mapping, stereo):
         for notes, side in [(left_notes, 'L'), (right_notes, 'R')]:
             mid = temp_dir / (side + '.mid')
             notes_to_midi_file(notes, mid, midi_mapping)
-            system('timidity %s -OwM' % mid)
+            system('timidity %s -OwM --preserve-silence' % mid)
         SP.print('Generating stereo output using sox.')
         fmt = 'sox -M -c 1 %s -c 1 %s -C 64.0 %s'
         system(fmt % (temp_dir / 'L.wav', temp_dir / 'R.wav', audio_file))
     else:
         mid = temp_dir / 't.mid'
         notes_to_midi_file(notes, mid, midi_mapping)
-        system('timidity %s -OwM' % mid)
+        system('timidity %s -OwM --preserve-silence' % mid)
         system('sox %s %s' % (temp_dir / 't.wav', audio_file))
     SP.leave()
