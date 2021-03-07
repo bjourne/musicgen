@@ -9,7 +9,7 @@ Usage:
 Options:
     -h --help              show this screen
     -v --verbose           print more output
-    --seed-idx=<i>         seed index [default: random]
+    --offset=<s>           prompt offset [default: random]
     --add-pause            insert a pause between the prompt and
                            generated code
 """
@@ -19,7 +19,12 @@ from docopt import docopt
 from musicgen.code_generators import get_code_generator
 from musicgen.code_utils import INSN_END
 from musicgen.tensorflow import load_generating_model, generate_sequences
-from musicgen.training_data import load_training_data, pick_song_fragment
+from musicgen.training_data import (load_training_data,
+                                    random_song_offset,
+                                    abs_ofs_to_rel,
+                                    rel_ofs_to_abs,
+                                    song_fragment,
+                                    save_generated_sequences)
 from musicgen.utils import SP, save_pickle
 from pathlib import Path
 from random import randrange
@@ -53,14 +58,27 @@ def main():
     n_clips = len(skews)
     n_generate = 800
     n_prompt = 64
+    if td.code_type == 'dcode':
+        SP.print('Code type is dcode so halving generation sizes.')
+        n_generate //= 2
+        n_prompt //= 2
+    n_frag = n_prompt + n_generate
 
     # Load the model
     model = load_generating_model(g, root_path, vocab_size, n_clips)
 
     # Pick a song fragment
-    n_frag = n_prompt + n_generate
-    seed_ix = args['--seed-idx']
-    seed_ix, frag = pick_song_fragment(td, seed_ix, n_frag, True)
+    rel_ofs = args['--offset']
+    if rel_ofs == 'random':
+        abs_ofs = random_song_offset(td, n_frag)
+        rel_ofs = abs_ofs_to_rel(td, abs_ofs)
+    else:
+        rel_ofs = tuple([int(s) for s in rel_ofs.split(':')])
+    abs_ofs = rel_ofs_to_abs(td, rel_ofs)
+    frag = song_fragment(td, abs_ofs, n_frag)
+    SP.print('Selected offset %s (%d).' % (rel_ofs, abs_ofs))
+
+    # Split it into prompt and original.
     prompt, orig = frag[:n_prompt], frag[n_prompt:]
     prompt = np.repeat(np.expand_dims(prompt, 0), n_clips, axis = 0)
 
@@ -84,18 +102,15 @@ def main():
     else:
         seqs = np.hstack((prompt, seqs))
 
+    # Same relative offsets for all generated files
+    rel_offsets = [rel_ofs] * len(skews)
+
     # Save generated code
     output_path = root_path / 'generated'
     output_path.mkdir(exist_ok = True)
 
-    fmt = '%010d-%s-%s-%s%.3f-%04d.pickle.gz'
-    for seq, log_prob, skew in zip(seqs, log_probs, skews):
-        args = (seed_ix, g['code-type'], g['network-type'],
-                skew[0][0], skew[1], -log_prob)
-        filename = fmt % args
-        file_path = output_path / filename
-        code = td.encoder.decode_chars(seq)
-        save_pickle(file_path, code)
+    save_generated_sequences(g, output_path, td,
+                             seqs, rel_offsets, log_probs, skews)
 
 if __name__ == '__main__':
     main()

@@ -20,28 +20,40 @@ from docopt import docopt
 from musicgen.code_generators import get_code_generator
 from musicgen.code_utils import INSN_END
 from musicgen.tensorflow import load_generating_model, generate_sequences
-from musicgen.training_data import load_training_data, pick_song_fragment
+from musicgen.training_data import (load_training_data,
+                                    abs_ofs_to_rel,
+                                    random_song_offset,
+                                    rel_ofs_to_abs,
+                                    song_fragment,
+                                    save_generated_sequences)
 from musicgen.utils import SP, load_pickle_cache, save_pickle
 from pathlib import Path
-from random import choices
+from random import choices, randrange
 from tensorflow.nn import softmax
 
 import numpy as np
 import tensorflow as tf
 
-def bulk_generate(g, root_path, offsets, td, n_prompt, n_generate):
+def bulk_generate(g, root_path, rel_offsets, td, n_prompt, n_generate):
+
     # Pick the prompts
-    n_clips = len(offsets)
+    n_clips = len(rel_offsets)
     n_frag = n_prompt + n_generate
-    frags = np.array([pick_song_fragment(td, o, n_frag, True)[1]
-                      for o in offsets])
+
+    # Make offsets absolute
+    abs_offsets = [rel_ofs_to_abs(td, rel_ofs)
+                   for rel_ofs in rel_offsets]
+
+    frags = np.array([song_fragment(td, o, n_frag) for o in abs_offsets])
+
     prompt, orig = frags[:,:n_prompt], frags[:,n_prompt:]
+    SP.print('%s, %s' % (prompt.shape, orig.shape))
 
     # Token(s) to avoid
     end_ix = td.encoder.encode_char((INSN_END, 0), False)
 
     # Generate tokens
-    skews = [g['sampling-method']] * len(offsets)
+    skews = [g['sampling-method']] * len(rel_offsets)
     if g['network-type'] in ('lstm', 'gpt2', 'transformer'):
         vocab_size = len(td.encoder.ix2ch)
         model = load_generating_model(g, root_path, vocab_size, n_clips)
@@ -52,7 +64,8 @@ def bulk_generate(g, root_path, offsets, td, n_prompt, n_generate):
         log_probs = [0] * n_clips
     elif g['network-type'] == 'random':
         ixs = [ix for ix in td.encoder.ix2ch if ix != end_ix]
-        seqs = np.array([choices(ixs, k = n_generate) for _ in offsets])
+        seqs = np.array([choices(ixs, k = n_generate)
+                         for _ in rel_offsets])
         log_probs = [0] * n_clips
     else:
         assert False
@@ -64,22 +77,8 @@ def bulk_generate(g, root_path, offsets, td, n_prompt, n_generate):
     output_path = root_path / 'bulk-generated'
     output_path.mkdir(exist_ok = True)
 
-    fmt = '%010d-%s-%s-%s%.3f-%04d.pickle.gz'
-    skew_type_to_char = {
-        'top-p' : 'p',
-        'temperature' : 't',
-        'original' : 'o',
-        'random' : 'r'
-    }
-    for seq, offset, log_prob, skew in zip(seqs, offsets,
-                                           log_probs, skews):
-        skew_ch = skew_type_to_char[skew[0]]
-        args = (offset, g['code-type'], g['network-type'],
-                skew_ch, skew[1], -log_prob)
-        filename = fmt % args
-        file_path = output_path / filename
-        code = td.encoder.decode_chars(seq)
-        save_pickle(file_path, code)
+    save_generated_sequences(g, output_path, td,
+                             seqs, rel_offsets, log_probs, skews)
 
 def main():
     # Prologue
@@ -91,7 +90,6 @@ def main():
     # Kind of code
     g = get_code_generator(args['<generator>'])
 
-    # Load training data
     _, td, _ = load_training_data(g['code-type'], root_path)
     vocab_size = len(td.encoder.ix2ch)
 
@@ -99,41 +97,48 @@ def main():
     n_prompt = int(args['--n-prompt'])
     n_generate = int(args['--n-generate'])
     n_clips = int(args['--n-clips'])
-    n_frag = n_prompt + n_generate
-
     if n_generate % 2 == 1 or n_prompt % 2 == 1:
         raise ValueError('The number of tokens in the prompt and '
                          'the number of tokens to generate must '
                          'be divisible by two.')
+    if td.code_type == 'dcode':
+        SP.print('Code type is dcode so halving generation sizes.')
+        n_generate //= 2
+        n_prompt //= 2
+    n_frag = n_prompt + n_generate
 
     # Load schedule and create the prompt array
     output_path = root_path / 'bulk-generated'
     output_path.mkdir(exist_ok = True)
 
+    # We save the random indexes in a file so that the same bulk job
+    # can be repeated using other code generators.
     schedule_name = 'schedule-%04d.pickle.gz' % n_clips
     schedule_path = output_path / schedule_name
-    def build_schedule():
-        return [pick_song_fragment(td, 'random', n_frag, False)[0]
-                for _ in range(n_clips)]
-    offsets = load_pickle_cache(schedule_path, build_schedule)
+    def pickle_cache_fun():
+        offsets = [random_song_offset(td, n_frag)
+                   for _ in range(n_clips)]
+        return [abs_ofs_to_rel(td, o) for o in offsets]
+    rel_offsets = load_pickle_cache(schedule_path, pickle_cache_fun)
 
     # Filter out those that already exist
     output_path = root_path / 'bulk-generated'
-    existing = [e.stem.split('-')[:3]
+    existing = [e.stem.split('-')[:4]
                 for e in output_path.glob('*.pickle.gz')]
-    existing = [e for e in existing if len(e) == 3]
-    existing = {(int(o), c, n) for (o, c, n) in existing}
-    offsets = [o for o in offsets
-               if not (o, g['code-type'], g['network-type']) in existing]
+    existing = [e for e in existing if len(e) == 4]
+    existing = {(int(b), int(r), c, n) for (b, r, c, n) in existing}
+    rel_offsets = [(b, r) for (b, r) in rel_offsets
+                   if not (b, r, g['code-type'], g['network-type'])
+                   in existing]
 
-    n_offsets = len(offsets)
-    SP.print('Generating %d clips.' % n_offsets)
+    n_rel_offsets = len(rel_offsets)
+    SP.print('Generating %d clips.' % n_rel_offsets)
 
     # Splitting the load into chunks of 16. To many sequences at once
     # either exhausts the memory or times out Google Colab.
     job_size = 16
-    for i in range(0, n_offsets, job_size):
-        job = offsets[i:i+job_size]
+    for i in range(0, n_rel_offsets, job_size):
+        job = rel_offsets[i:i+job_size]
         bulk_generate(g, root_path, job, td, n_prompt, n_generate)
 
 if __name__ == '__main__':

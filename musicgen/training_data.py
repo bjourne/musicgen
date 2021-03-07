@@ -1,5 +1,7 @@
 # Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
-from collections import Counter, namedtuple
+#
+# There's lots of random stuff in this module.
+from collections import namedtuple
 from musicgen import dcode, pcode_abs, pcode_rel, scode_abs, scode_rel
 from musicgen.code_utils import (CODE_MIDI_MAPPING, INSN_END, INSN_PITCH,
                                  guess_percussive_instruments)
@@ -212,7 +214,6 @@ def build_cache(path, shuffle_path, mods, code_type):
     indices = load_pickle_cache(shuffle_path, rebuild_fn)
     tmp = [(i, e) for (i, e) in zip(indices, mod_files)]
     mod_files = [e for (_, e) in sorted(tmp)]
-
     return load_and_encode_mod_files(mod_files, code_type)
 
 class TrainingData:
@@ -302,6 +303,54 @@ def load_training_data(code_type, path):
     print_histogram(td)
     return train, valid, test
 
+# The point of this hairy code is to be able to convert offsets in the
+# pcode cache file to corresponding offsets in the dcode cache file.
+def abs_ofs_to_rel(td, abs_ofs):
+    end_idx = td.encoder.encode_char((INSN_END, 0), False)
+    endings = np.where(td.data[:abs_ofs] == end_idx)[0]
+    base = len(endings)
+    if base > 0:
+        rel = abs_ofs - endings[-1] - 1
+    else:
+        rel = abs_ofs
+
+    # Ensure that the relative offset is in even pcode units.
+    if td.code_type == 'dcode':
+        rel *= 2
+    if rel % 2 == 1:
+        rel -= 1
+    return base, rel
+
+def rel_ofs_to_abs(td, rel_ofs):
+    base, rel = rel_ofs
+    # Cause rel is in even pcode units
+    assert rel % 2 == 0
+    if td.code_type == 'dcode':
+        rel //= 2
+    if base == 0:
+        return rel
+    end_idx = td.encoder.encode_char((INSN_END, 0), False)
+    endings = np.where(td.data == end_idx)[0]
+    ending_ofs = endings[base - 1]
+    return ending_ofs + 1 + rel
+
+def random_song_offset(td, n):
+    end_idx = td.encoder.encode_char((INSN_END, 0), False)
+    while True:
+        abs_ofs = randrange(len(td.data) - n)
+        frag = td.data[abs_ofs:abs_ofs + n]
+        if not end_idx in frag:
+            return abs_ofs
+        else:
+            SP.print('INSN_END in sampled sequence, retrying.')
+
+def song_fragment(td, abs_ofs, n_frag):
+    frag = td.data[abs_ofs:abs_ofs + n_frag]
+    code = td.encoder.decode_chars(frag)
+    code = CODE_MODULES[td.code_type].normalize_pitches(code)
+    return td.encoder.encode_chars(code, False)
+
+# Remove these
 def find_name_by_offset(meta, seek):
     at = meta[0][0]
     for ofs, name in meta[1:]:
@@ -333,3 +382,23 @@ def pick_song_fragment(td, i, n, normalize_pitches):
         code = CODE_MODULES[td.code_type].normalize_pitches(code)
         frag = td.encoder.encode_chars(code, False)
     return i, frag
+
+def save_generated_sequences(g, output_path, td,
+                             seqs, rel_offsets, log_probs, skews):
+    fmt = '%06d-%06d-%s-%s-%s%.3f-%04d.pickle.gz'
+    skew_type_to_char = {
+        'top-p' : 'p',
+        'temperature' : 't',
+        'original' : 'o',
+        'random' : 'r'
+    }
+    for seq, rel_offset, log_prob, skew in zip(seqs, rel_offsets,
+                                               log_probs, skews):
+        skew_ch = skew_type_to_char[skew[0]]
+        args = (rel_offset[0], rel_offset[1],
+                g['code-type'], g['network-type'],
+                skew_ch, skew[1], -log_prob)
+        filename = fmt % args
+        file_path = output_path / filename
+        code = td.encoder.decode_chars(seq)
+        save_pickle(file_path, code)
