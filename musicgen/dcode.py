@@ -26,8 +26,8 @@ def to_code(mod, percussion):
         code.append((INSN_SILENCE, 1))
     return pcode_to_dcode(code)
 
-def to_notes(code):
-    return pcode.to_notes(dcode_to_pcode(code), False)
+def to_notes(code, row_time):
+    return pcode.to_notes(list(dcode_to_pcode(code)), False, row_time)
 
 def is_transposable():
     return True
@@ -41,6 +41,10 @@ def normalize_pitches(code):
     code = list(dcode_to_pcode(code))
     code = code_utils.normalize_pitches(code)
     return list(pcode_to_dcode(code))
+
+def estimate_row_time(code):
+    code = list(dcode_to_pcode(code))
+    return pcode.estimate_row_time(code, False)
 
 def test_encode_decode(mod_file):
     from musicgen.code_utils import (CODE_MIDI_MAPPING,
