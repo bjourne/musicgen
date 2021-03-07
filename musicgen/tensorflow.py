@@ -506,8 +506,6 @@ def generate_sequences_normal(model, n_generate, banned_ixs, prompt, skews,
                               max_seq_len):
     log_prob_sums = np.zeros(len(skews))
     preds = np.empty((0, prompt.shape[0]), int)
-
-    SP.print('Generating %d tokens.' % n_generate)
     for _ in trange(n_generate):
         logits = model(prompt, training = False)[:, -1, :]
         ixs, log_probs = sample_logits(logits, banned_ixs, skews)
@@ -530,8 +528,6 @@ def generate_sequences_lstm(model, n_generate, banned_ixs,
     # generate the first prediction.
     preds = np.expand_dims(prompt[:, -1], 0)
     log_prob_sums = np.zeros(len(skews))
-
-    SP.print('Generating %d tokens.' % n_generate)
     for _ in trange(n_generate):
         logits = model.predict(preds[-1])[:, -1, :]
         ixs, log_probs = sample_logits(logits, banned_ixs, skews)
