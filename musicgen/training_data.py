@@ -14,6 +14,7 @@ from musicgen.utils import (SP, CharEncoder,
                             flatten, file_name_for_params,
                             load_pickle_cache, save_pickle,
                             sort_groupby)
+from pathlib import Path
 from random import randrange, shuffle
 import numpy as np
 
@@ -131,7 +132,8 @@ def mod_file_to_codes_w_progress(i, n, file_path, code_type):
         percussion = guess_percussive_instruments(mod, notes)
         if notes:
             fmt = '%d rows, %d ms/row, percussion %s, %d notes'
-            args = len(rows), notes[0].time_ms, percussion, len(notes)
+            args = (len(rows), notes[0].time_ms,
+                    set(percussion), len(notes))
             SP.print(fmt % args)
 
         err = training_error(notes, percussion)
@@ -150,7 +152,8 @@ def mod_file_to_codes_w_progress(i, n, file_path, code_type):
                 codes = code_mod.code_transpositions(code)
             else:
                 codes = [code]
-            SP.print('%d transpositions' % len(codes))
+            fmt = '%d transpositions of length %d'
+            SP.print(fmt % (len(codes), len(code)))
             parsed_subsongs.append((True, idx, codes))
         SP.leave()
     SP.leave()
@@ -400,3 +403,31 @@ def save_generated_sequences(g, output_path, td,
         file_path = output_path / filename
         code = td.encoder.decode_chars(seq)
         save_pickle(file_path, code)
+
+def convert_to_midi(code_type, mod_file):
+    code_mod = CODE_MODULES[code_type]
+    mod = load_file(mod_file)
+    subsongs = linearize_subsongs(mod, 1)
+    volumes = [header.volume for header in mod.sample_headers]
+    for idx, (_, rows) in enumerate(subsongs):
+        notes = rows_to_mod_notes(rows, volumes)
+        percussion = guess_percussive_instruments(mod, notes)
+        if notes:
+            fmt = '%d rows, %d ms/row, percussion %s, %d notes'
+            args = len(rows), notes[0].time_ms, percussion, len(notes)
+            SP.print(fmt % args)
+        pitches = {n.pitch_idx for n in notes
+                   if n.sample_idx not in percussion}
+        min_pitch = min(pitches, default = 0)
+        for n in notes:
+            n.pitch_idx -= min_pitch
+        code = list(code_mod.to_code(notes, percussion))
+        row_time = code_mod.estimate_row_time(code)
+        notes = code_mod.to_notes(code, row_time)
+        fname = Path('test-%02d.mid' % idx)
+        notes_to_audio_file(notes, fname, CODE_MIDI_MAPPING, False)
+
+if __name__ == '__main__':
+    from sys import argv
+    SP.enabled = True
+    convert_to_midi(argv[1], argv[2])

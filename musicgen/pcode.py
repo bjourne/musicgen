@@ -110,36 +110,3 @@ def to_code(notes, rel_pitches, percussion):
         else:
             yield INSN_PITCH, arg
         at = ofs
-
-########################################################################
-# Test encode and decode
-########################################################################
-def test_encode_decode(mod_file, rel_pitches):
-    from musicgen.code_utils import CODE_MIDI_MAPPING
-    from musicgen.generation import notes_to_midi_file
-    from musicgen.parser import load_file
-    from musicgen.rows import linearize_subsongs
-    mod = load_file(mod_file)
-    subsongs = linearize_subsongs(mod, 1)
-    volumes = [header.volume for header in mod.sample_headers]
-    for idx, (_, rows) in enumerate(subsongs):
-        notes = rows_to_mod_notes(rows, volumes)
-        percussion = guess_percussive_instruments(mod, notes)
-        if notes:
-            fmt = '%d rows, %d ms/row, percussion %s, %d notes'
-            args = len(rows), notes[0].time_ms, percussion, len(notes)
-            SP.print(fmt % args)
-        pitches = {n.pitch_idx for n in notes
-                   if n.sample_idx not in percussion}
-        min_pitch = min(pitches, default = 0)
-        for n in notes:
-                n.pitch_idx -= min_pitch
-        code = list(to_code(notes, rel_pitches, percussion))
-        notes = to_notes(code, rel_pitches)
-        fname = 'test-%02d.mid' % idx
-        notes_to_midi_file(notes, fname, CODE_MIDI_MAPPING)
-
-if __name__ == '__main__':
-    from sys import argv
-    SP.enabled = True
-    test_encode_decode(argv[1], bool(int(argv[2])))

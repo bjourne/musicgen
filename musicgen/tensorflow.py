@@ -380,35 +380,6 @@ class GPT2(Model):
 
         return self.wte(hs, mode = 'linear')
 
-def file_stem(g):
-    if g['network-type'] == 'lstm':
-        args = (g['code-type'], g['network-type'],
-                g['batch-size'], g['learning-rate'],
-                g['sequence-length'],
-                g['dropout'], g['recurrent-dropout'],
-                g['embedding-size'],
-                g['lstm1-units'], g['lstm2-units'])
-        fmt = '%s-%s-%04d-%.5f-%03d-%.2f-%.2f-%03d-%04d-%04d'
-    elif g['network-type'] == 'gpt2':
-        args = (g['code-type'], g['network-type'],
-                g['batch-size'], g['learning-rate'],
-                g['sequence-length'])
-        fmt = '%s-%s-%04d-%.5f-%03d'
-    elif g['network-type'] == 'transformer':
-        args = (g['code-type'], g['network-type'],
-                g['batch-size'], g['learning-rate'],
-                g['sequence-length'])
-        fmt = '%s-%s-%04d-%.5f-%03d'
-    else:
-        assert False
-    return fmt % args
-
-def weights_file(g):
-    return 'weights-%s.h5' % file_stem(g)
-
-def log_file(g):
-    return 'log-%s.log' % file_stem(g)
-
 def load_training_model(g, root_path, vocab_size):
     with select_strategy().scope():
         if g['network-type'] == 'transformer':

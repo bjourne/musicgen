@@ -1,9 +1,11 @@
 # Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
 from musicgen.code_utils import INSN_END, INSN_PITCH
 from musicgen.corpus import IndexedModule, load_index, save_index
-from musicgen.training_data import (ERR_FEW_UNIQUE_PITCHES,
+from musicgen.training_data import (CODE_MODULES,
+                                    ERR_FEW_UNIQUE_PITCHES,
                                     ERR_PARSE_ERROR,
                                     TrainingData,
+                                    convert_to_midi,
                                     load_and_encode_mod_files,
                                     load_training_data,
                                     mod_file_to_codes_w_progress,
@@ -144,3 +146,8 @@ def test_packed_module():
                                                file_path, 'pcode_abs'))
     assert len(result) == 1
     assert result[0] == (False, 0, (ERR_PARSE_ERROR, 'PowerPackerModule'))
+
+def test_convert_to_midi():
+    file_path = TEST_PATH / 'zodiak_-_gasp.mod'
+    for code_type in CODE_MODULES:
+        convert_to_midi(code_type, file_path)

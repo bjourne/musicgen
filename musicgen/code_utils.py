@@ -11,7 +11,7 @@ CODE_MIDI_MAPPING = {
     4 : [1, 54, 3, 1.0]
 }
 
-BASE_ROW_TIME = 210
+BASE_ROW_TIME = 200
 
 # Standard instructions
 INSN_PITCH = 'P'

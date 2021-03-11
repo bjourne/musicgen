@@ -13,8 +13,9 @@ from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
-from musicgen.code_generators import get_code_generator
-from musicgen.tensorflow import log_file, file_stem
+from musicgen.code_generators import (file_stem,
+                                      get_code_generator,
+                                      log_file)
 from musicgen.training_data import TrainingData, tally_tokens
 from musicgen.utils import SP
 from pathlib import Path

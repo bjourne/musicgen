@@ -33,6 +33,14 @@ CODE_GENERATORS = {
         'sequence-length' : 512,
         'sampling-method' : ('top-p', 0.99)
     },
+    'gpt2-pcode-rel-1' : {
+        'code-type' : 'pcode_rel',
+        'network-type' : 'gpt2',
+        'batch-size' : 256,
+        'learning-rate' : 0.00001,
+        'sequence-length' : 256,
+        'sampling-method' : ('top-p', 0.98)
+    },
     'gpt2-dcode-1' : {
         'code-type' : 'dcode',
         'network-type' : 'gpt2',
@@ -61,8 +69,38 @@ CODE_GENERATORS = {
 
 def get_code_generator(gen_name):
     generator = CODE_GENERATORS.get(gen_name)
-    if not generator:
-        names = ', '.join(name for name in CODE_GENERATORS)
-        fmt = '%s is not a code generator. Specify one of %s'
-        raise ValueError(fmt % (gen_name, names))
-    return generator
+    if generator:
+        return generator
+    names = sorted(name for name in CODE_GENERATORS)
+    name_str = ', '.join(names[:-1]) + ', and ' + names[-1]
+    fmt = '%s is not a code generator. Specify one of %s'
+    raise ValueError(fmt % (gen_name, name_str))
+
+def file_stem(g):
+    if g['network-type'] == 'lstm':
+        args = (g['code-type'], g['network-type'],
+                g['batch-size'], g['learning-rate'],
+                g['sequence-length'],
+                g['dropout'], g['recurrent-dropout'],
+                g['embedding-size'],
+                g['lstm1-units'], g['lstm2-units'])
+        fmt = '%s-%s-%04d-%.5f-%03d-%.2f-%.2f-%03d-%04d-%04d'
+    elif g['network-type'] == 'gpt2':
+        args = (g['code-type'], g['network-type'],
+                g['batch-size'], g['learning-rate'],
+                g['sequence-length'])
+        fmt = '%s-%s-%04d-%.5f-%03d'
+    elif g['network-type'] == 'transformer':
+        args = (g['code-type'], g['network-type'],
+                g['batch-size'], g['learning-rate'],
+                g['sequence-length'])
+        fmt = '%s-%s-%04d-%.5f-%03d'
+    else:
+        assert False
+    return fmt % args
+
+def weights_file(g):
+    return 'weights-%s.h5' % file_stem(g)
+
+def log_file(g):
+    return 'log-%s.log' % file_stem(g)

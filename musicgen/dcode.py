@@ -45,32 +45,3 @@ def normalize_pitches(code):
 def estimate_row_time(code):
     code = list(dcode_to_pcode(code))
     return pcode.estimate_row_time(code, False)
-
-def test_encode_decode(mod_file):
-    from musicgen.code_utils import (CODE_MIDI_MAPPING,
-                                     guess_percussive_instruments)
-    from musicgen.generation import notes_to_midi_file
-    from musicgen.parser import load_file
-    from musicgen.rows import linearize_subsongs, rows_to_mod_notes
-    mod = load_file(mod_file)
-    subsongs = linearize_subsongs(mod, 1)
-    volumes = [header.volume for header in mod.sample_headers]
-    for idx, (_, rows) in enumerate(subsongs):
-        notes = rows_to_mod_notes(rows, volumes)
-        percussion = guess_percussive_instruments(mod, notes)
-        if notes:
-            fmt = '%d rows, %d ms/row, percussion %s, %d notes'
-            args = len(rows), notes[0].time_ms, percussion, len(notes)
-            SP.print(fmt % args)
-        pitches = {n.pitch_idx for n in notes
-                   if n.sample_idx not in percussion}
-        min_pitch = min(pitches, default = 0)
-        code = to_code(notes, percussion, min_pitch)
-        notes = to_notes(code)
-        fname = 'test-%02d.mid' % idx
-        notes_to_midi_file(notes, fname, CODE_MIDI_MAPPING)
-
-if __name__ == '__main__':
-    from sys import argv
-    SP.enabled = True
-    test_encode_decode(argv[1])
