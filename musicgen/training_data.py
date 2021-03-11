@@ -2,7 +2,7 @@
 #
 # There's lots of random stuff in this module.
 from collections import namedtuple
-from musicgen import dcode, pcode_abs, pcode_rel, scode_abs, scode_rel
+from musicgen import dcode, pcode_abs, pcode_rel
 from musicgen.code_utils import (CODE_MIDI_MAPPING, INSN_END, INSN_PITCH,
                                  guess_percussive_instruments)
 from musicgen.corpus import load_index
@@ -20,8 +20,6 @@ import numpy as np
 CODE_MODULES = {
     'pcode_abs' : pcode_abs,
     'pcode_rel' : pcode_rel,
-    'scode_abs' : scode_abs,
-    'scode_rel' : scode_rel,
     'dcode' : dcode
 }
 

@@ -97,16 +97,6 @@ def test_code_types():
     td.load_disk_cache(TMP_DIR, 150)
     assert len(td.meta) == 26
 
-    td = TrainingData('scode_abs')
-    td.load_disk_cache(TMP_DIR, 150)
-    assert len(td.meta) == 26
-
-def test_scode_rel():
-    maybe_build_index()
-    td = TrainingData('scode_rel')
-    td.load_disk_cache(TMP_DIR, 150)
-    assert len(td.meta) == 26
-
 def test_dcode():
     maybe_build_index()
     td = TrainingData('dcode')
