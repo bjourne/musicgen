@@ -47,7 +47,13 @@ def token_distribution_plot(td, png_path):
     print('tot', tot)
     values = [v / tot for v in values]
 
-    type_colors = {'D' : 'C0', 'P' : 'C1', 'S' : 'C2', 'X' : 'C3'}
+    type_colors = {
+        'D' : 'C0',
+        'P' : 'C1',
+        'R' : 'C1',
+        'S' : 'C2',
+        'X' : 'C3'
+    }
 
     fig, ax = plt.subplots(figsize = (12, 6))
     bars = ax.bar(np.arange(len(values)), values, width = 0.80)
@@ -59,7 +65,6 @@ def token_distribution_plot(td, png_path):
                        ha = 'right')
     tot_fmt = '{:,}'.format(sum(values))
     ax.set(xlabel = 'token', ylabel = 'freq.')
-    ax.grid()
     fig.savefig(png_path)
 
 def main():
