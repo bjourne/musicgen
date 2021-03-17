@@ -328,13 +328,15 @@ class SharedEmbeddings(Layer):
         super().build(input_shape)
 
     def call(self, inputs, mode):
-        if mode == "embedding":
+        if mode == 'embedding':
             return tf.gather(self.weight, inputs)
-        elif mode == "linear":
+        elif mode == 'linear':
             first_dims = inputs.shape[:-1]
             x = tf.reshape(inputs, [-1, HIDDEN_SIZE])
             logits = tf.matmul(x, self.weight, transpose_b=True)
             return tf.reshape(logits, first_dims + [self.vocab_size])
+        else:
+            assert False
 
 class GPT2(Model):
     def __init__(self, vocab_size):
@@ -351,36 +353,32 @@ class GPT2(Model):
         self.drop = Dropout(EMBD_PDROP)
 
     def call(self, inputs, training = False):
-        input_ids = inputs
-        input_shape = input_ids.shape
-        input_ids = tf.reshape(input_ids, [-1, input_shape[-1]])
+        input_shape = inputs.shape
+        seq_len = input_shape[-1]
+        inputs = tf.reshape(inputs, [-1, seq_len])
 
-        position_ids = tf.range(0, input_shape[-1],
+        position_ids = tf.range(0, seq_len,
                                 dtype = tf.int32)[tf.newaxis, :]
 
         # Prepare head mask if needed
         # 1.0 in head_mask indicate we keep the head
         # attention_probs has shape bsz x n_heads x N x N
-        position_ids = tf.reshape(position_ids,
-                                  [-1, position_ids.shape[-1]])
+        position_ids = tf.reshape(position_ids, [-1, seq_len])
 
-        inputs_embeds = self.wte(input_ids, mode = "embedding")
+        inputs_embeds = self.wte(inputs, 'embedding')
         position_embeds = self.wpe(position_ids)
 
         hs = inputs_embeds + position_embeds
         hs = self.drop(hs, training = training)
-
         output_shape = input_shape + [hs.shape[-1]]
 
         for block in self.h:
             hs = block(hs, training)
-
         hs = self.ln_f(hs)
         hs = tf.reshape(hs, output_shape)
+        return self.wte(hs, 'linear')
 
-        return self.wte(hs, mode = 'linear')
-
-def load_training_model(g, root_path, vocab_size):
+def load_training_model(g, vocab_size):
     with select_strategy().scope():
         if g['network-type'] == 'transformer':
             model = transformer(vocab_size, 128, 2048, 0.2, 8, 16,
@@ -405,18 +403,9 @@ def load_training_model(g, root_path, vocab_size):
         model.compile(optimizer = opt, loss = loss_fn,
                       metrics = metrics)
         model(tf.constant([[0]]))
-
-    weights_path = root_path / 'weights' / weights_file(g)
-    if weights_path.exists():
-        SP.print('Loading weights from %s...' % weights_path)
-        model.load_weights(str(weights_path))
-    else:
-        SP.print('Weights file %s not found.' % weights_path)
-    model.reset_states()
-    model.summary()
     return model
 
-def load_generating_model(g, root_path, vocab_size, batch_size):
+def load_generating_model(g, vocab_size, batch_size):
     if g['network-type'] == 'lstm':
         model = lstm_model(vocab_size,
                            g['embedding-size'],
@@ -431,11 +420,6 @@ def load_generating_model(g, root_path, vocab_size, batch_size):
             model = GPT2(vocab_size)
             model.compile()
         model(tf.constant([[0]]))
-    weights_path = root_path / 'weights' / weights_file(g)
-    assert weights_path.exists()
-    model.load_weights(str(weights_path))
-    model.reset_states()
-    model.summary()
     return model
 
 def temperature_skew(P, temp):
@@ -506,7 +490,6 @@ def generate_sequences_lstm(model, n_generate, banned_ixs,
         preds = np.vstack((preds, ixs))
     # Skip the first element which is not actually a prediction.
     return preds.T[:,1:], log_prob_sums
-
 
 def generate_sequences(g, model, prompt, n_generate, banned_ixs, skews):
     if g['network-type'] == 'lstm':
