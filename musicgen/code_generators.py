@@ -1,4 +1,6 @@
-# Hardcoded for now, will fix later
+# Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
+#
+# Hardcoded for now, will (maybe) fix later.
 CODE_GENERATORS = {
     'transformer-pcode-1' : {
         'code-type' : 'pcode_abs',
@@ -24,6 +26,20 @@ CODE_GENERATORS = {
 
         'sampling-method' : ('top-p', 0.98)
     },
+    'lstm-pcode-rel-1' : {
+        'code-type' : 'pcode_rel',
+        'network-type' : 'lstm',
+
+        'batch-size' : 256,
+        'learning-rate' : 0.004,
+        'sequence-length' : 256,
+
+        'dropout' : 0.25, 'recurrent-dropout' : 0.25,
+        'embedding-size' : 100,
+        'lstm1-units' : 512, 'lstm2-units' : 512,
+
+        'sampling-method' : ('top-p', 0.98)
+    },
     'gpt2-pcode-1' : {
         'code-type' : 'pcode_abs',
         'network-type' : 'gpt2',
@@ -36,9 +52,9 @@ CODE_GENERATORS = {
     'gpt2-pcode-rel-1' : {
         'code-type' : 'pcode_rel',
         'network-type' : 'gpt2',
-        'batch-size' : 256,
+        'batch-size' : 64,
         'learning-rate' : 0.00001,
-        'sequence-length' : 256,
+        'sequence-length' : 32,
         'sampling-method' : ('top-p', 0.98)
     },
     'gpt2-dcode-1' : {
