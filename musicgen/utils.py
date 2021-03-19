@@ -122,7 +122,7 @@ class CharEncoder:
     def encode_char(self, ch, add_missing):
         if ch not in self.ch2ix:
             if not add_missing:
-                raise ValueError('%s missing!' % ch)
+                raise ValueError('%s missing!' % (ch,))
             self.ch2ix[ch] = self.next_idx
             self.ix2ch[self.next_idx] = ch
             self.next_idx += 1
