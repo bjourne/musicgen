@@ -39,7 +39,7 @@ def loss_plot(log_file, png_path):
     fig.savefig(png_path)
 
 def token_distribution_plot(td, png_path):
-    counts = tally_tokens(td.encoder, td.data)
+    counts = tally_tokens(td.encoder, td.songs)
     names = ['%s%s' % ch for (ch, _) in counts]
     values = [v for (_, v) in counts]
 

@@ -16,14 +16,13 @@ Options:
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from docopt import docopt
-from musicgen.code_generators import get_code_generator
+from musicgen.code_generators import get_code_generator, weights_file
 from musicgen.code_utils import INSN_END
 from musicgen.tensorflow import load_generating_model, generate_sequences
-from musicgen.training_data import (load_training_data,
-                                    random_song_offset,
-                                    abs_ofs_to_rel,
-                                    rel_ofs_to_abs,
-                                    song_fragment,
+from musicgen.training_data import (CODE_MODULES,
+                                    load_training_data,
+                                    normalize_pitches,
+                                    random_rel_ofs,
                                     save_generated_sequences)
 from musicgen.utils import SP, save_pickle
 from pathlib import Path
@@ -64,29 +63,38 @@ def main():
         n_prompt //= 2
     n_frag = n_prompt + n_generate
 
-    # Load the model
-    model = load_generating_model(g, root_path, vocab_size, n_clips)
+    # Load the model and the weights
+    model = load_generating_model(g, vocab_size, n_clips)
+    weights_path = root_path / 'weights' / weights_file(g)
+    assert weights_path.exists()
+    model.load_weights(str(weights_path))
+    model.reset_states()
+    model.summary()
 
     # Pick a song fragment
-    rel_ofs = args['--offset']
-    if rel_ofs == 'random':
-        abs_ofs = random_song_offset(td, n_frag)
-        rel_ofs = abs_ofs_to_rel(td, abs_ofs)
+    ofs = args['--offset']
+    if ofs == 'random':
+        ofs = random_rel_ofs(td, n_frag)
     else:
-        rel_ofs = tuple([int(s) for s in rel_ofs.split(':')])
-    abs_ofs = rel_ofs_to_abs(td, rel_ofs)
-    frag = song_fragment(td, abs_ofs, n_frag)
-    SP.print('Selected offset %s (%d).' % (rel_ofs, abs_ofs))
+        ofs = tuple([int(s) for s in ofs.split('-')])
+    s_i, ss_i, t_i, o = ofs
+    name = td.songs[s_i][0]
+
+    SP.print('Selected offset %s of song %s.' % (ofs, name))
+    frag = td.songs[s_i][1][ss_i][t_i][o:o+n_frag]
+
+    # Normalize it
+    frag = normalize_pitches(td, frag)
 
     # Split it into prompt and original.
     prompt, orig = frag[:n_prompt], frag[n_prompt:]
     prompt = np.repeat(np.expand_dims(prompt, 0), n_clips, axis = 0)
 
     # Token(s) to avoid
-    end_ix = td.encoder.encode_char((INSN_END, 0), False)
+    #end_ix = td.encoder.encode_char((INSN_END, 0), False)
 
     seqs, log_probs = generate_sequences(g, model, prompt, n_generate,
-                                         [end_ix], skews)
+                                         [], skews)
 
     # Add the original
     seqs = np.vstack((seqs, orig))
@@ -103,7 +111,7 @@ def main():
         seqs = np.hstack((prompt, seqs))
 
     # Same relative offsets for all generated files
-    rel_offsets = [rel_ofs] * len(skews)
+    rel_offsets = [ofs] * len(skews)
 
     # Save generated code
     output_path = root_path / 'generated'

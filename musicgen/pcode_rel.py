@@ -14,3 +14,6 @@ def is_transposable():
 
 def estimate_row_time(code):
     return pcode.estimate_row_time(code, True)
+
+def normalize_pitches(code):
+    return code

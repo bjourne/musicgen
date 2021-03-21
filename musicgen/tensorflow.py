@@ -1,7 +1,6 @@
 # Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
 from musicgen.utils import SP
 from os import environ
-from tensorflow.data import Dataset
 from tensorflow.config import *
 from tensorflow.distribute import OneDeviceStrategy
 from tensorflow.distribute.cluster_resolver import TPUClusterResolver
@@ -50,21 +49,6 @@ def select_strategy():
     SP.leave()
     return strategy
 
-def sequence_to_samples(seq, length):
-    # stride = length - 1
-    def split_input_target(chunk):
-        return chunk[:-1], chunk[1:]
-    def flatten_window(win):
-        return win.batch(length + 1, drop_remainder = True)
-    source = tf.constant(seq, dtype = tf.int32)
-    # Note that one element in each window overlaps.
-    return Dataset    \
-        .from_tensor_slices(source) \
-        .window(length + 1, length, drop_remainder = True) \
-        .flat_map(flatten_window) \
-        .map(split_input_target) \
-        .shuffle(10000)
-
 def compute_and_apply_gradients(model, x, y):
     with tf.GradientTape() as tape:
         y_hat = model(x, training = True)
@@ -91,7 +75,7 @@ def lstm_model(vocab_size, emb_size,
     inp = Input(
         shape = (None,),
         batch_size = batch_size,
-        dtype = tf.int32)
+    dtype = tf.uint16)
     embedding = Embedding(
         input_dim = vocab_size,
         output_dim = emb_size)
@@ -329,7 +313,7 @@ class SharedEmbeddings(Layer):
 
     def call(self, inputs, mode):
         if mode == 'embedding':
-            return tf.gather(self.weight, inputs)
+            return tf.gather(self.weight, tf.cast(inputs, tf.int32))
         elif mode == 'linear':
             first_dims = inputs.shape[:-1]
             x = tf.reshape(inputs, [-1, HIDDEN_SIZE])

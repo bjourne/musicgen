@@ -17,14 +17,13 @@ Options:
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from docopt import docopt
-from musicgen.code_generators import get_code_generator
+from musicgen.code_generators import get_code_generator, weights_file
 from musicgen.code_utils import INSN_END
 from musicgen.tensorflow import load_generating_model, generate_sequences
-from musicgen.training_data import (load_training_data,
-                                    abs_ofs_to_rel,
-                                    random_song_offset,
-                                    rel_ofs_to_abs,
-                                    song_fragment,
+from musicgen.training_data import (CODE_MODULES,
+                                    load_training_data,
+                                    normalize_pitches,
+                                    random_rel_ofs,
                                     save_generated_sequences)
 from musicgen.utils import SP, load_pickle_cache, save_pickle
 from pathlib import Path
@@ -40,25 +39,29 @@ def bulk_generate(g, root_path, rel_offsets, td, n_prompt, n_generate):
     n_clips = len(rel_offsets)
     n_frag = n_prompt + n_generate
 
-    # Make offsets absolute
-    abs_offsets = [rel_ofs_to_abs(td, rel_ofs)
-                   for rel_ofs in rel_offsets]
-
-    frags = np.array([song_fragment(td, o, n_frag) for o in abs_offsets])
+    # Get fragments
+    frags = [td.songs[s_i][1][ss_i][t_i][o:o+n_frag]
+             for (s_i, ss_i, t_i, o) in rel_offsets]
+    frags = [normalize_pitches(td, frag) for frag in frags]
+    frags = np.array(frags)
 
     prompt, orig = frags[:,:n_prompt], frags[:,n_prompt:]
     SP.print('%s, %s' % (prompt.shape, orig.shape))
 
     # Token(s) to avoid
-    end_ix = td.encoder.encode_char((INSN_END, 0), False)
+    # end_ix = td.encoder.encode_char((INSN_END, 0), False)
 
     # Generate tokens
     skews = [g['sampling-method']] * len(rel_offsets)
     if g['network-type'] in ('lstm', 'gpt2', 'transformer'):
         vocab_size = len(td.encoder.ix2ch)
-        model = load_generating_model(g, root_path, vocab_size, n_clips)
+        model = load_generating_model(g, vocab_size, n_clips)
+        weights_path = root_path / 'weights' / weights_file(g)
+        assert weights_path.exists()
+        model.load_weights(str(weights_path))
+        model.reset_states()
         seqs, log_probs = generate_sequences(g, model, prompt, n_generate,
-                                             [end_ix], skews)
+                                             [], skews)
     elif g['network-type'] == 'original':
         seqs = orig
         log_probs = [0] * n_clips
@@ -116,19 +119,21 @@ def main():
     schedule_name = 'schedule-%04d.pickle.gz' % n_clips
     schedule_path = output_path / schedule_name
     def pickle_cache_fun():
-        offsets = [random_song_offset(td, n_frag)
-                   for _ in range(n_clips)]
-        return [abs_ofs_to_rel(td, o) for o in offsets]
+        return [random_rel_ofs(td, n_frag) for _ in range(n_clips)]
     rel_offsets = load_pickle_cache(schedule_path, pickle_cache_fun)
 
     # Filter out those that already exist
     output_path = root_path / 'bulk-generated'
-    existing = [e.stem.split('-')[:4]
+    existing = [e.stem.split('-')[:6]
                 for e in output_path.glob('*.pickle.gz')]
-    existing = [e for e in existing if len(e) == 4]
-    existing = {(int(b), int(r), c, n) for (b, r, c, n) in existing}
-    rel_offsets = [(b, r) for (b, r) in rel_offsets
-                   if not (b, r, g['code-type'], g['network-type'])
+    existing = [e for e in existing if len(e) == 6]
+
+    existing = {tuple([int(p) for p in e[:4]] + [e[4], e[5]])
+                for e in existing}
+    print(existing)
+
+    rel_offsets = [rel_ofs for rel_ofs in rel_offsets
+                   if not rel_ofs + (g['code-type'], g['network-type'])
                    in existing]
 
     n_rel_offsets = len(rel_offsets)

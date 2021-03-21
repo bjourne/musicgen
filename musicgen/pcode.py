@@ -98,7 +98,6 @@ def to_code(notes, rel_pitches, percussion):
         assert delta >= -1
 
     at = 0
-    last_pitch = None
     for ofs, is_drum, arg in notes:
         delta = ofs - at
         for sil in produce_silence(delta - 1):

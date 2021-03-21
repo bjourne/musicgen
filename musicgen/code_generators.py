@@ -12,7 +12,7 @@ CODE_GENERATORS = {
 
         'sampling-method' : ('top-p', 0.98)
     },
-    'lstm-pcode-1' : {
+    'lstm-pcode-abs-1' : {
         'code-type' : 'pcode_abs',
         'network-type' : 'lstm',
 
@@ -40,7 +40,7 @@ CODE_GENERATORS = {
 
         'sampling-method' : ('top-p', 0.98)
     },
-    'gpt2-pcode-1' : {
+    'gpt2-pcode-abs-1' : {
         'code-type' : 'pcode_abs',
         'network-type' : 'gpt2',
 

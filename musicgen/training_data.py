@@ -1,8 +1,8 @@
 # Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
 #
 # There's lots of random stuff in this module.
-from collections import namedtuple
-from musicgen import dcode, pcode_abs, pcode_rel
+from collections import Counter
+from musicgen import dcode, pcode_abs, pcode_rel, rcode
 from musicgen.code_utils import (CODE_MIDI_MAPPING, INSN_END, INSN_PITCH,
                                  guess_percussive_instruments)
 from musicgen.corpus import load_index
@@ -21,7 +21,8 @@ import numpy as np
 CODE_MODULES = {
     'pcode_abs' : pcode_abs,
     'pcode_rel' : pcode_rel,
-    'dcode' : dcode
+    'dcode' : dcode,
+    'rcode' : rcode
 }
 
 ERR_DISSONANCE = 0
@@ -120,7 +121,8 @@ def mod_file_to_codes_w_progress(i, n, file_path, code_type):
         SP.print('Unsupported module format.')
         SP.leave()
         err_arg = e.args[0] if e.args else e.__class__.__name__
-        return [(False, 0, (ERR_PARSE_ERROR, err_arg))]
+        yield False, 0, (ERR_PARSE_ERROR, err_arg)
+        return
 
     code_mod = CODE_MODULES[code_type]
     subsongs = list(linearize_subsongs(mod, 1))
@@ -138,7 +140,7 @@ def mod_file_to_codes_w_progress(i, n, file_path, code_type):
 
         err = training_error(notes, percussion)
         if err:
-            parsed_subsongs.append((False, idx, err))
+            yield False, idx, err
         else:
             pitches = {n.pitch_idx for n in notes
                        if n.sample_idx not in percussion}
@@ -154,50 +156,40 @@ def mod_file_to_codes_w_progress(i, n, file_path, code_type):
                 codes = [code]
             fmt = '%d transpositions of length %d'
             SP.print(fmt % (len(codes), len(code)))
-            parsed_subsongs.append((True, idx, codes))
+            yield True, idx, codes
         SP.leave()
     SP.leave()
-    return parsed_subsongs
 
 def load_and_encode_mod_files(mod_files, code_type):
     encoder = CharEncoder()
     n = len(mod_files)
-    end_tok = (INSN_END, 0)
-    meta = []
-    data = []
     errors = []
-    offset = 0
+    songs = []
     for i, p, in enumerate(mod_files):
-        parsed_subsongs = mod_file_to_codes_w_progress(i + 1, n,
-                                                       p, code_type)
+        subsongs = list(mod_file_to_codes_w_progress(i + 1, n,
+                                                     p, code_type))
+
         # Handle errors
         errors.extend([(p.name, idx, err)
-                       for (trainable, idx, err) in parsed_subsongs
+                       for (trainable, idx, err) in subsongs
                        if not trainable])
 
         # Filter those that parsed
-        codes = [codes for (trainable, _, codes) in parsed_subsongs
+        codes = [codes for (trainable, _, codes) in subsongs
                  if trainable]
-        # Flatten subsongs
-        codes = flatten(codes)
-        # Add end token
-        code = flatten([c + [end_tok] for c in codes])
 
-        # Encode
-        code = encoder.encode_chars(code, True)
-        code = np.array(code, dtype = np.uint16)
-        n_code = len(code)
-
-        # Skip if empty
-        if n_code == 0:
+        # Skip if none did
+        if len(codes) == 0:
             continue
 
-        data.append(code)
-        meta.append((offset, p.name))
-        offset += n_code
-
+        # Encode
+        codes = [[np.array(encoder.encode_chars(trans, True),
+                           dtype = np.uint16)
+                  for trans in subsong]
+                 for subsong in codes]
+        songs.append((p.name, codes))
     print_encoding_errors(errors)
-    return encoder, meta, np.concatenate(data) if data else []
+    return encoder, songs
 
 def build_cache(path, shuffle_path, mods, code_type):
     mod_files = [path / mod.genre / mod.fname for mod in mods]
@@ -248,45 +240,40 @@ class TrainingData:
         def rebuild_fn():
             return build_cache(path, shuffle_path, mods, self.code_type)
         o = load_pickle_cache(cache_path, rebuild_fn)
-        self.encoder, self.meta, self.data = o
+        self.encoder, self.songs = o
 
     def load_mod_file(self, p):
         o = load_and_encode_mod_files([p], self.code_type)
-        self.encoder, self.meta, self.data = o
+        self.encoder, self.songs = o
 
     def split_3way(self, train_frac, valid_frac):
-        n_mods = len(self.meta)
-        n_train = int(n_mods * train_frac)
-        n_valid = int(n_mods * valid_frac)
-        n_test = n_mods - n_train - n_valid
-
-        valid_offset = self.meta[n_train][0]
-        test_offset = self.meta[n_train + n_valid][0]
+        n_songs = len(self.songs)
+        n_train = int(n_songs * train_frac)
+        n_valid = int(n_songs * valid_frac)
+        n_test = n_songs - n_train - n_valid
 
         tds = [TrainingData(self.code_type) for _ in range(3)]
-        tds[0].data = self.data[:valid_offset]
-        tds[0].meta = self.meta[:n_train]
-
-        tds[1].data = self.data[valid_offset:test_offset]
-        tds[1].meta = self.meta[n_train:n_train + n_valid]
-
-        tds[2].data = self.data[test_offset:]
-        tds[2].meta = self.meta[n_train + n_valid:]
-
+        tds[0].songs = self.songs[:n_train]
+        tds[1].songs = self.songs[n_train:n_train + n_valid]
+        tds[2].songs = self.songs[n_train + n_valid:]
         for td in tds:
-            base_ofs = td.meta[0][0]
             td.encoder = self.encoder
-            td.meta = [(o - base_ofs, n) for (o, n) in td.meta]
         return tds
 
-def tally_tokens(encoder, data):
-    unique, counts = np.unique(data, return_counts = True)
+def tally_tokens(encoder, songs):
+    counter = Counter()
+    for name, song in songs:
+        for subsong in song:
+            for transp in subsong:
+                els, counts = np.unique(transp, return_counts = True)
+                for el, count in zip(els, counts):
+                    counter[el] += count
     ch_counts = [(encoder.decode_char(ix), cnt) for (ix, cnt) in
-                 zip(unique, counts)]
+                 counter.items()]
     return sorted(ch_counts)
 
 def print_histogram(td):
-    counts = tally_tokens(td.encoder, td.data)
+    counts = tally_tokens(td.encoder, td.songs)
     total = sum(v for (_, v) in counts)
     SP.header('%d TOKENS %d TYPES' % (total, len(counts)))
     for (cmd, arg), cnt in counts:
@@ -304,102 +291,62 @@ def load_training_data(code_type, path):
     print_histogram(td)
     return train, valid, test
 
-# The point of this hairy code is to be able to convert offsets in the
-# pcode cache file to corresponding offsets in the dcode cache file.
-def abs_ofs_to_rel(td, abs_ofs):
-    end_idx = td.encoder.encode_char((INSN_END, 0), False)
-    endings = np.where(td.data[:abs_ofs] == end_idx)[0]
-    base = len(endings)
-    if base > 0:
-        rel = abs_ofs - endings[-1] - 1
-    else:
-        rel = abs_ofs
-
-    # Ensure that the relative offset is in even pcode units.
-    if td.code_type == 'dcode':
-        rel *= 2
-    if rel % 2 == 1:
-        rel -= 1
-    return base, rel
-
-def rel_ofs_to_abs(td, rel_ofs):
-    base, rel = rel_ofs
-    # Cause rel is in even pcode units
-    assert rel % 2 == 0
-    if td.code_type == 'dcode':
-        rel //= 2
-    if base == 0:
-        return rel
-    end_idx = td.encoder.encode_char((INSN_END, 0), False)
-    endings = np.where(td.data == end_idx)[0]
-    ending_ofs = endings[base - 1]
-    return ending_ofs + 1 + rel
-
-def random_song_offset(td, n):
-    end_idx = td.encoder.encode_char((INSN_END, 0), False)
-    while True:
-        abs_ofs = randrange(len(td.data) - n)
-        frag = td.data[abs_ofs:abs_ofs + n]
-        if not end_idx in frag:
-            return abs_ofs
-        else:
-            SP.print('INSN_END in sampled sequence, retrying.')
-
-def song_fragment(td, abs_ofs, n_frag):
-    frag = td.data[abs_ofs:abs_ofs + n_frag]
+def normalize_pitches(td, frag):
     code = td.encoder.decode_chars(frag)
     code = CODE_MODULES[td.code_type].normalize_pitches(code)
-    return td.encoder.encode_chars(code, False)
+    frag = td.encoder.encode_chars(code, False)
+    return frag
 
-# Remove these
-def find_name_by_offset(meta, seek):
-    at = meta[0][0]
-    for ofs, name in meta[1:]:
-        if ofs > seek:
-            return at
-        at = name
-    return meta[-1][1]
+def abs_ofs_to_rel_ofs(td, abs_ofs):
+    at = 0
+    for s_i, (name, s) in enumerate(td.songs):
+        for ss_i, ss in enumerate(s):
+            for t_i, t in enumerate(ss):
+                t_len = len(t)
+                assert t_len < 100_000
+                if at + t_len > abs_ofs:
+                    o = abs_ofs - at
+                    # Ensure that the relative offset is in even pcode
+                    # units.
+                    if td.code_type == 'dcode':
+                        o *= 2
+                    if o % 2 == 1:
+                        o -= 1
+                    return s_i, ss_i, t_i, o
+                at += t_len
+    return None
 
-def pick_song_fragment(td, i, n, normalize_pitches):
-    if i != 'random':
-        i = int(i)
-        frag = td.data[i:i + n]
-    else:
-        end_idx = td.encoder.encode_char((INSN_END, 0), False)
-        while True:
-            i = randrange(len(td.data) - n)
-            frag = td.data[i:i + n]
-            if end_idx in frag:
-                SP.print('EOS in fragment, regenerating.')
-            else:
-                break
-        assert not end_idx in frag
-    name = find_name_by_offset(td.meta, i)
-    fmt = 'Picked fragment at %d+%d of song %s.'
-    SP.print(fmt % (i, len(frag), name))
-
-    if normalize_pitches:
-        code = td.encoder.decode_chars(frag)
-        code = CODE_MODULES[td.code_type].normalize_pitches(code)
-        frag = td.encoder.encode_chars(code, False)
-    return i, frag
+def random_rel_ofs(td, n):
+    tot = sum(sum(sum(len(transp) for transp in subsong)
+                  for subsong in song) for name, song in td.songs)
+    while True:
+        abs_ofs = randrange(tot - n)
+        s_i, ss_i, t_i, o = abs_ofs_to_rel_ofs(td, abs_ofs)
+        transp = td.songs[s_i][1][ss_i][t_i]
+        if o + n > len(transp):
+            continue
+        return s_i, ss_i, t_i, o
 
 def save_generated_sequences(g, output_path, td,
                              seqs, rel_offsets, log_probs, skews):
-    fmt = '%06d-%06d-%s-%s-%s%.3f-%04d.pickle.gz'
     skew_type_to_char = {
         'top-p' : 'p',
         'temperature' : 't',
         'original' : 'o',
         'random' : 'r'
     }
+
+    song_fmt = '%s-%s-%s-%s%.3f-%04d.pickle.gz'
+    song_id_fmt = '%04d-%02d-%02d-%05d'
+
     for seq, rel_offset, log_prob, skew in zip(seqs, rel_offsets,
                                                log_probs, skews):
+
+        song_id = song_id_fmt % rel_offset
         skew_ch = skew_type_to_char[skew[0]]
-        args = (rel_offset[0], rel_offset[1],
-                g['code-type'], g['network-type'],
-                skew_ch, skew[1], -log_prob)
-        filename = fmt % args
+        filename = song_fmt % (song_id,
+                               g['code-type'], g['network-type'],
+                               skew_ch, skew[1], -log_prob)
         file_path = output_path / filename
         code = td.encoder.decode_chars(seq)
         save_pickle(file_path, code)
@@ -412,16 +359,18 @@ def convert_to_midi(code_type, mod_file):
     for idx, (_, rows) in enumerate(subsongs):
         notes = rows_to_mod_notes(rows, volumes)
         percussion = guess_percussive_instruments(mod, notes)
-        if notes:
-            fmt = '%d rows, %d ms/row, percussion %s, %d notes'
-            args = len(rows), notes[0].time_ms, percussion, len(notes)
-            SP.print(fmt % args)
         pitches = {n.pitch_idx for n in notes
                    if n.sample_idx not in percussion}
         min_pitch = min(pitches, default = 0)
         for n in notes:
             n.pitch_idx -= min_pitch
         code = list(code_mod.to_code(notes, percussion))
+
+        fmt = '%d notes, %d rows, %d tokens, %d ms/row, percussion %s'
+        args = (len(notes), len(rows), len(code),
+                notes[0].time_ms if notes else - 1, set(percussion))
+        SP.print(fmt % args)
+
         row_time = code_mod.estimate_row_time(code)
         notes = code_mod.to_notes(code, row_time)
         fname = Path('test-%02d.mid' % idx)

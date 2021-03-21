@@ -14,6 +14,7 @@ Options:
     --format=<fmt>         output format [default: mid]
 '''
 from docopt import docopt
+from math import sin, pi
 from musicgen.code_generators import get_code_generator
 from musicgen.code_utils import CODE_MIDI_MAPPING
 from musicgen.generation import notes_to_audio_file
@@ -35,7 +36,7 @@ def main():
     format = args['--format']
     for file_path in file_paths:
         code = load_pickle(file_path)
-        code_type = file_path.name.split('-')[2]
+        code_type = file_path.name.split('-')[4]
         code_mod = CODE_MODULES[code_type]
 
         # Halve the code length to use for tempo estimation in case
@@ -46,6 +47,16 @@ def main():
             n_estimate = n_prompt
         row_time = code_mod.estimate_row_time(code[:n_estimate])
         notes = code_mod.to_notes(code, row_time)
+
+        # Creates a simple fadeout. Not sure if it is a good feature
+        # or not.
+        max_row = max(n.row_idx for n in notes)
+        for n in notes:
+            delim = 0.9
+            if n.row_idx / max_row > delim:
+                over = 1 - n.row_idx / max_row
+                frac = over / (1 - delim)
+                n.vol = 32 + int(16 * frac)
 
         prefix = '.'.join(str(file_path).split('.')[:-2])
         output_name = '%s.%s' % (prefix, format)
