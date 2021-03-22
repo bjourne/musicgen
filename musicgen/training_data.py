@@ -2,7 +2,7 @@
 #
 # There's lots of random stuff in this module.
 from collections import Counter
-from musicgen import dcode, pcode_abs, pcode_rel, rcode
+from musicgen import dcode, pcode_abs, pcode_rel, rcode, rcode2
 from musicgen.code_utils import (CODE_MIDI_MAPPING, INSN_END, INSN_PITCH,
                                  guess_percussive_instruments)
 from musicgen.corpus import load_index
@@ -22,7 +22,8 @@ CODE_MODULES = {
     'pcode_abs' : pcode_abs,
     'pcode_rel' : pcode_rel,
     'dcode' : dcode,
-    'rcode' : rcode
+    'rcode' : rcode,
+    'rcode2' : rcode2
 }
 
 ERR_DISSONANCE = 0

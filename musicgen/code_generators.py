@@ -2,6 +2,7 @@
 #
 # Hardcoded for now, will (maybe) fix later.
 CODE_GENERATORS = {
+    # Pcode abs
     'transformer-pcode-1' : {
         'code-type' : 'pcode_abs',
         'network-type' : 'transformer',
@@ -26,6 +27,26 @@ CODE_GENERATORS = {
 
         'sampling-method' : ('top-p', 0.98)
     },
+    'gpt2-pcode-abs-1' : {
+        'code-type' : 'pcode_abs',
+        'network-type' : 'gpt2',
+
+        'batch-size' : 64,
+        'learning-rate' : 0.00001,
+        'sequence-length' : 512,
+        'sampling-method' : ('top-p', 0.99)
+    },
+    'orig-pcode' : {
+        'code-type' : 'pcode_abs',
+        'network-type' : 'original',
+        'sampling-method' : ('original', 0)
+    },
+    'random-pcode' : {
+        'code-type' : 'pcode_abs',
+        'network-type' : 'random',
+        'sampling-method' : ('random', 0)
+    },
+    # Pcode rel
     'lstm-pcode-rel-1' : {
         'code-type' : 'pcode_rel',
         'network-type' : 'lstm',
@@ -40,15 +61,6 @@ CODE_GENERATORS = {
 
         'sampling-method' : ('top-p', 0.98)
     },
-    'gpt2-pcode-abs-1' : {
-        'code-type' : 'pcode_abs',
-        'network-type' : 'gpt2',
-
-        'batch-size' : 64,
-        'learning-rate' : 0.00001,
-        'sequence-length' : 512,
-        'sampling-method' : ('top-p', 0.99)
-    },
     'gpt2-pcode-rel-1' : {
         'code-type' : 'pcode_rel',
         'network-type' : 'gpt2',
@@ -57,6 +69,7 @@ CODE_GENERATORS = {
         'sequence-length' : 32,
         'sampling-method' : ('top-p', 0.98)
     },
+    # Dcode
     'gpt2-dcode-1' : {
         'code-type' : 'dcode',
         'network-type' : 'gpt2',
@@ -71,16 +84,26 @@ CODE_GENERATORS = {
         'network-type' : 'original',
         'sampling-method' : ('original', 0)
     },
-    'orig-pcode' : {
-        'code-type' : 'pcode_abs',
-        'network-type' : 'original',
-        'sampling-method' : ('original', 0)
+    # Rcode
+    'gpt2-rcode-1' : {
+        'code-type' : 'rcode',
+        'network-type' : 'gpt2',
+
+        'batch-size' : 64,
+        'learning-rate' : 0.00001,
+        'sequence-length' : 512,
+        'sampling-method' : ('top-p', 0.98)
     },
-    'random-pcode' : {
-        'code-type' : 'pcode_abs',
-        'network-type' : 'random',
-        'sampling-method' : ('random', 0)
-    }
+    # Rcode2
+    'gpt2-rcode2-1' : {
+        'code-type' : 'rcode2',
+        'network-type' : 'gpt2',
+
+        'batch-size' : 64,
+        'learning-rate' : 0.00001,
+        'sequence-length' : 512,
+        'sampling-method' : ('top-p', 0.98)
+    },
 }
 
 def get_code_generator(gen_name):
