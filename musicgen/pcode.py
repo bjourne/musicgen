@@ -47,8 +47,11 @@ def to_notes_without_tempo(pcode, rel_pitches):
 def estimate_row_time(code, rel_pitches):
     notes = to_notes_without_tempo(code, rel_pitches)
     row_indices = {n.row_idx for n in notes}
-    max_row = max(row_indices, default = 1)
-    return int(BASE_ROW_TIME * len(row_indices) / max_row)
+    max_row = max(row_indices, default = 0)
+    if max_row == 0:
+        return 100
+    row_time = int(BASE_ROW_TIME * len(row_indices) / max_row)
+    return max(row_time, 80)
 
 def to_notes(pcode, rel_pitches, row_time):
     notes = to_notes_without_tempo(pcode, rel_pitches)
