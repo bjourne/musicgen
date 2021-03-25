@@ -1,4 +1,5 @@
 # Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
+from musicgen import gpt2
 from musicgen.utils import SP
 from os import environ
 from tensorflow.config import *
@@ -7,8 +8,6 @@ from tensorflow.distribute.cluster_resolver import TPUClusterResolver
 from tensorflow.distribute import TPUStrategy
 from tensorflow.keras import *
 from tensorflow.keras.callbacks import ReduceLROnPlateau
-from tensorflow.keras.activations import gelu
-from tensorflow.keras.initializers import *
 from tensorflow.keras.layers import *
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.optimizers import *
@@ -175,193 +174,6 @@ def transformer(vocab_size, d_model, ffn_units, dropout,
     x = Dense(vocab_size, kernel_initializer = random_uniform)(x)
     return Model(inputs = inp, outputs = x)
 
-# GPT2 hyper params
-HIDDEN_SIZE = 768
-INITIALIZER_RANGE = 0.02
-N_POSITIONS = 1024
-N_LAYER = 12
-L_NORM_EPS = 1e-5
-N_HEAD = 12
-
-# Dropout rates
-EMBD_PDROP = 0.15
-ATTN_PDROP = 0.15
-RESID_PDROP = 0.15
-
-def casual_attn_mask(nd, ns, dtype):
-    i = tf.range(nd)[:, None]
-    j = tf.range(ns)
-    m = i >= j - ns + nd
-    return tf.cast(m, dtype)
-
-class Conv1D(Layer):
-    def __init__(self, nf, nx, **kwargs):
-        super().__init__(**kwargs)
-        self.nf = nf
-        self.nx = nx
-
-    def build(self, input_shape):
-        self.weight = self.add_weight(
-            "weight",
-            shape=[self.nx, self.nf],
-            initializer = TruncatedNormal(stddev = INITIALIZER_RANGE)
-        )
-        self.bias = self.add_weight(
-            "bias",
-            shape=[1, self.nf],
-            initializer=tf.zeros_initializer()
-        )
-
-    def call(self, x):
-        bz, sl = x.shape[:2]
-        x = tf.reshape(x, [-1, self.nx])
-        x = tf.matmul(x, self.weight) + self.bias
-        x = tf.reshape(x, [bz, sl, self.nf])
-        return x
-
-class Attn(Layer):
-    def __init__(self):
-        super().__init__()
-        self.c_attn = Conv1D(3 * HIDDEN_SIZE, HIDDEN_SIZE,
-                             name = 'c_attn')
-        self.c_proj = Conv1D(HIDDEN_SIZE, HIDDEN_SIZE,
-                             name = 'c_proj')
-        self.attn_dropout = Dropout(ATTN_PDROP)
-        self.resid_dropout = Dropout(RESID_PDROP)
-
-    def split_heads(self, x):
-        new_x_shape = x.shape[:-1] + [N_HEAD, x.shape[-1] // N_HEAD]
-        x = tf.reshape(x, new_x_shape)
-        return tf.transpose(x, (0, 2, 1, 3))
-
-    def merge_heads(self, x):
-        x = tf.transpose(x, (0, 2, 1, 3))
-        new_x_shape = x.shape[:-2] + [x.shape[-2] * x.shape[-1]]
-        return tf.reshape(x, new_x_shape)
-
-    def attn(self, q, k, v, training):
-        w = tf.matmul(q, k, transpose_b = True)
-
-        # Always scale
-        dk = tf.cast(k.shape[-1], dtype = w.dtype)
-        w = w / tf.math.sqrt(dk)
-
-        _, _, nd, ns = w.shape
-        b = casual_attn_mask(nd, ns, dtype = w.dtype)
-        b = tf.reshape(b, (1, 1, nd, ns))
-        w = w * b - 1e4 * (1 - b)
-
-        w = tf.nn.softmax(w, axis = -1)
-        # Dropout follows softmax?
-        w = self.attn_dropout(w, training = training)
-
-        return tf.matmul(w, v)
-
-    def call(self, x, training):
-        x = self.c_attn(x)
-        q, k, v = tf.split(x, 3, axis = 2)
-        q = self.split_heads(q)
-        k = self.split_heads(k)
-        v = self.split_heads(v)
-
-        a = self.attn(q, k, v, training)
-        a = self.merge_heads(a)
-        a = self.c_proj(a)
-        a = self.resid_dropout(a, training = training)
-        return a
-
-class Block(Layer):
-    def __init__(self):
-        super().__init__()
-        self.ln_1 = LayerNormalization(epsilon = L_NORM_EPS,
-                                       name = 'ln_1')
-        self.attn = Attn()
-        self.ln_2 = LayerNormalization(epsilon = L_NORM_EPS,
-                                       name = 'ln_2')
-
-        n_state = 4 * HIDDEN_SIZE
-        self.c_fc = Conv1D(n_state, HIDDEN_SIZE, name = 'c_fc')
-        self.c_proj = Conv1D(HIDDEN_SIZE, n_state, name = 'c_proj')
-        self.dropout = Dropout(RESID_PDROP)
-
-    def call(self, x, training):
-        a = self.ln_1(x)
-        a = self.attn(a, training)
-        x = x + a
-
-        m = self.ln_2(x)
-        m = gelu(self.c_fc(m))
-        m = self.c_proj(m)
-        m = self.dropout(m, training = training)
-
-        x = x + m
-        return x
-
-class SharedEmbeddings(Layer):
-    def __init__(self, vocab_size):
-        super().__init__(name = 'wte')
-        self.vocab_size = vocab_size
-
-    def build(self, input_shape):
-        initializer = TruncatedNormal(stddev = INITIALIZER_RANGE)
-        self.weight = self.add_weight(
-            "weight",
-            shape = [self.vocab_size, HIDDEN_SIZE],
-            initializer = initializer
-        )
-        super().build(input_shape)
-
-    def call(self, inputs, mode):
-        if mode == 'embedding':
-            return tf.gather(self.weight, tf.cast(inputs, tf.int32))
-        elif mode == 'linear':
-            first_dims = inputs.shape[:-1]
-            x = tf.reshape(inputs, [-1, HIDDEN_SIZE])
-            logits = tf.matmul(x, self.weight, transpose_b=True)
-            return tf.reshape(logits, first_dims + [self.vocab_size])
-        else:
-            assert False
-
-class GPT2(Model):
-    def __init__(self, vocab_size):
-        super(GPT2, self).__init__()
-        self.wte = SharedEmbeddings(vocab_size)
-        initializer = TruncatedNormal(stddev = INITIALIZER_RANGE)
-        self.wpe = Embedding(
-            N_POSITIONS,
-            HIDDEN_SIZE,
-            embeddings_initializer = initializer,
-            name = 'wpe')
-        self.h = [Block() for _ in range(N_LAYER)]
-        self.ln_f = LayerNormalization(epsilon = L_NORM_EPS)
-        self.drop = Dropout(EMBD_PDROP)
-
-    def call(self, inputs, training = False):
-        input_shape = inputs.shape
-        seq_len = input_shape[-1]
-        inputs = tf.reshape(inputs, [-1, seq_len])
-
-        position_ids = tf.range(0, seq_len,
-                                dtype = tf.int32)[tf.newaxis, :]
-
-        # Prepare head mask if needed
-        # 1.0 in head_mask indicate we keep the head
-        # attention_probs has shape bsz x n_heads x N x N
-        position_ids = tf.reshape(position_ids, [-1, seq_len])
-
-        inputs_embeds = self.wte(inputs, 'embedding')
-        position_embeds = self.wpe(position_ids)
-
-        hs = inputs_embeds + position_embeds
-        hs = self.drop(hs, training = training)
-        output_shape = input_shape + [hs.shape[-1]]
-
-        for block in self.h:
-            hs = block(hs, training)
-        hs = self.ln_f(hs)
-        hs = tf.reshape(hs, output_shape)
-        return self.wte(hs, 'linear')
-
 def load_training_model(g, vocab_size):
     with select_strategy().scope():
         if g['network-type'] == 'transformer':
@@ -378,7 +190,9 @@ def load_training_model(g, vocab_size):
                                False, g['batch-size'])
             opt = RMSprop(learning_rate = g['learning-rate'])
         elif g['network-type'] == 'gpt2':
-            model = GPT2(vocab_size)
+            gpt2.VOCAB_SIZE = vocab_size
+            gpt2.HIDDEN_SIZE = g['hidden-size']
+            model = gpt2.GPT2()
             opt = Adam(learning_rate = g['learning-rate'], epsilon=1e-08)
         else:
             assert False
@@ -398,7 +212,6 @@ def load_generating_model(g, vocab_size, batch_size):
                            0.0, 0.0,
                            True, batch_size)
     elif g['network-type'] == 'gpt2':
-        # Some cargo culting here
         strategy = select_strategy()
         with strategy.scope():
             model = GPT2(vocab_size)
@@ -431,6 +244,10 @@ def skew_distribution(P, sampling_method):
 def sample_logits(logits, banned_ixs, skews):
     eps = np.finfo('float').eps
     Ps = softmax(logits).numpy()
+
+    confusion_indices = np.where(np.max(Ps, axis = 1) < 0.5)[0]
+    if len(confusion_indices) > 0:
+        SP.print([skews[i] for i in confusion_indices])
 
     # Dont sample any "banned" tokens
     for ix in banned_ixs:
@@ -484,3 +301,35 @@ def generate_sequences(g, model, prompt, n_generate, banned_ixs, skews):
         return generate_sequences_normal(model, n_generate,
                                          banned_ixs, prompt, skews,
                                          g['sequence-length'])
+
+def unlikelihood_loss(y_true, y_pred, from_logits):
+    if len(y_true.shape) != 2:
+        raise ValueError('y_true must have shape [bs x sl]')
+    if len(y_pred.shape) != 3:
+        raise ValueError('y_pred must have shape [bs x sl x vs]')
+    bs, sl, vs = y_pred.shape
+
+    # Produces a tensor of shape [bs x sl x vs]. The tensor is 1 if
+    # the unlikelihood loss should be applied for the token type and 0
+    # otherwise.
+    candidate_mask = tf.reshape(tf.tile(y_true, [1, sl]), (bs, sl, sl))
+    candidate_mask += 1
+    candidate_mask *= tf.sequence_mask(tf.range(sl), sl, dtype=tf.int32)
+    candidate_mask = tf.reduce_sum(
+        tf.one_hot(candidate_mask, vs + 1)[:, :, :, 1:], axis=2)
+    candidate_mask = tf.cast(tf.cast(candidate_mask, tf.bool), tf.float32)
+
+    # True mask has shape [bs x sl x vs] and is 0 if the token type
+    # is the true token and 1 otherwise.
+    true_mask = tf.cast(tf.math.logical_not(
+        tf.cast(tf.one_hot(y_true, vs, dtype=tf.int32), tf.bool)),
+                        tf.float32)
+
+    final_mask = candidate_mask * true_mask
+
+    if from_logits:
+        y_true = tf.nn.softmax(y_true, axis = -1)
+    unlikelihood = tf.math.log(1 - y_true) * final_mask
+
+    # Reduce!
+    return -tf.reduce_sum(unlikelihood, axis = -1)

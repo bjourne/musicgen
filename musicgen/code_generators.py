@@ -67,7 +67,8 @@ CODE_GENERATORS = {
         'batch-size' : 64,
         'learning-rate' : 0.00001,
         'sequence-length' : 32,
-        'sampling-method' : ('top-p', 0.98)
+        'sampling-method' : ('top-p', 0.98),
+        'hidden-size' : 768
     },
     # Dcode
     'gpt2-dcode-1' : {
@@ -77,7 +78,8 @@ CODE_GENERATORS = {
         'batch-size' : 64,
         'learning-rate' : 0.00001,
         'sequence-length' : 512,
-        'sampling-method' : ('top-p', 0.98)
+        'sampling-method' : ('top-p', 0.98),
+        'hidden-size' : 768
     },
     'orig-dcode' : {
         'code-type' : 'dcode',
@@ -92,7 +94,8 @@ CODE_GENERATORS = {
         'batch-size' : 64,
         'learning-rate' : 0.00001,
         'sequence-length' : 512,
-        'sampling-method' : ('top-p', 0.98)
+        'sampling-method' : ('top-p', 0.98),
+        'hidden-size' : 768
     },
     # Rcode2
     'gpt2-rcode2-1' : {
@@ -102,7 +105,8 @@ CODE_GENERATORS = {
         'batch-size' : 64,
         'learning-rate' : 0.00001,
         'sequence-length' : 512,
-        'sampling-method' : ('top-p', 0.98)
+        'sampling-method' : ('top-p', 0.98),
+        'hidden-size' : 768
     },
 }
 
@@ -127,8 +131,9 @@ def file_stem(g):
     elif g['network-type'] == 'gpt2':
         args = (g['code-type'], g['network-type'],
                 g['batch-size'], g['learning-rate'],
-                g['sequence-length'])
-        fmt = '%s-%s-%04d-%.5f-%03d'
+                g['sequence-length'],
+                g['hidden-size'])
+        fmt = '%s-%s-%04d-%.5f-%03d-%04d'
     elif g['network-type'] == 'transformer':
         args = (g['code-type'], g['network-type'],
                 g['batch-size'], g['learning-rate'],
