@@ -174,6 +174,10 @@ def transformer(vocab_size, d_model, ffn_units, dropout,
     x = Dense(vocab_size, kernel_initializer = random_uniform)(x)
     return Model(inputs = inp, outputs = x)
 
+def set_gpt2_params(g, vocab_size):
+    gpt2.VOCAB_SIZE = vocab_size
+    gpt2.HIDDEN_SIZE = g['hidden-size']
+
 def load_training_model(g, vocab_size):
     with select_strategy().scope():
         if g['network-type'] == 'transformer':
@@ -190,8 +194,7 @@ def load_training_model(g, vocab_size):
                                False, g['batch-size'])
             opt = RMSprop(learning_rate = g['learning-rate'])
         elif g['network-type'] == 'gpt2':
-            gpt2.VOCAB_SIZE = vocab_size
-            gpt2.HIDDEN_SIZE = g['hidden-size']
+            set_gpt2_params(g, vocab_size)
             model = gpt2.GPT2()
             opt = Adam(learning_rate = g['learning-rate'], epsilon=1e-08)
         else:
@@ -214,7 +217,8 @@ def load_generating_model(g, vocab_size, batch_size):
     elif g['network-type'] == 'gpt2':
         strategy = select_strategy()
         with strategy.scope():
-            model = GPT2(vocab_size)
+            set_gpt2_params(g, vocab_size)
+            model = gpt2.GPT2()
             model.compile()
         model(tf.constant([[0]]))
     return model
