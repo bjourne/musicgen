@@ -289,7 +289,6 @@ def load_training_data(code_type, path):
     else:
         td.load_mod_file(path)
         train = valid = test = td
-    print_histogram(td)
     return train, valid, test
 
 def normalize_pitches(td, frag):
