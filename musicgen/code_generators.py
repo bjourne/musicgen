@@ -34,7 +34,19 @@ CODE_GENERATORS = {
         'batch-size' : 64,
         'learning-rate' : 0.00001,
         'sequence-length' : 512,
-        'sampling-method' : ('top-p', 0.99)
+        'sampling-method' : ('top-p', 0.99),
+        'hidden-size' : 768
+    },
+    # Training this one with unlikelihood
+    'gpt2-pcode-abs-2' : {
+        'code-type' : 'pcode_abs',
+        'network-type' : 'gpt2',
+
+        'batch-size' : 256,
+        'learning-rate' : 0.00001,
+        'sequence-length' : 256,
+        'sampling-method' : ('top-p', 0.92),
+        'hidden-size' : 768
     },
     'orig-pcode' : {
         'code-type' : 'pcode_abs',
@@ -78,6 +90,16 @@ CODE_GENERATORS = {
         'batch-size' : 64,
         'learning-rate' : 0.00001,
         'sequence-length' : 512,
+        'sampling-method' : ('top-p', 0.98),
+        'hidden-size' : 768
+    },
+    'gpt2-dcode-2' : {
+        'code-type' : 'dcode',
+        'network-type' : 'gpt2',
+
+        'batch-size' : 256,
+        'learning-rate' : 0.00001,
+        'sequence-length' : 256,
         'sampling-method' : ('top-p', 0.98),
         'hidden-size' : 768
     },
