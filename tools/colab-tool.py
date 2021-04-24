@@ -1,16 +1,16 @@
-# Copyright (C) 2020 Björn Lindqvist <bjourne@gmail.com>
+# Copyright (C) 2020-2021 Björn Lindqvist <bjourne@gmail.com>
 #
 # Interact with Google Colab. There are maybe easier ways of doing
 # this.
 """Colab Tool
 
 Usage:
-    colab-tool.py [-v] get-data
-    colab-tool.py [-v] upload-code
-    colab-tool.py [-v] upload-caches <corpus-path>
-    colab-tool.py [-v] upload-file <local-file>
-    colab-tool.py [-v] run-file -- <file> <args>...
-    colab-tool.py [-v] upload-and-run-file [--drop-path] -- <file> <args>...
+    colab-tool.py [options] get-data
+    colab-tool.py [options] upload-code
+    colab-tool.py [options] upload-caches <corpus-path>
+    colab-tool.py [options] upload-file <local-file>
+    colab-tool.py [options] run-file -- <file> <args>...
+    colab-tool.py [options] upload-and-run-file [--drop-path] -- <file> <args>...
 
 Options:
     -h --help                   show this screen
