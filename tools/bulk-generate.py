@@ -18,7 +18,6 @@ from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from docopt import docopt
 from musicgen.code_generators import get_code_generator, weights_file
-from musicgen.code_utils import INSN_END
 from musicgen.tensorflow import load_generating_model, generate_sequences
 from musicgen.training_data import (CODE_MODULES,
                                     load_training_data,
@@ -33,26 +32,26 @@ from tensorflow.nn import softmax
 import numpy as np
 import tensorflow as tf
 
-def bulk_generate(g, root_path, rel_offsets, td, n_prompt, n_generate):
-
-    # Pick the prompts
-    n_clips = len(rel_offsets)
+def bulk_generate(g, root_path, offsets, td, n_prompt, n_generate):
+    n_clips = len(offsets)
     n_frag = n_prompt + n_generate
 
+    transps = [td.songs[s_i][1][ss_i][t_i]
+               for (s_i, ss_i, t_i, _) in offsets]
+    rel_offsets = [o for (s_i, ss_i, t_i, o) in offsets]
+    if td.code_type == 'dcode':
+        rel_offsets = [o // 2 for o in rel_offsets]
+
     # Get fragments
-    frags = [td.songs[s_i][1][ss_i][t_i][o:o+n_frag]
-             for (s_i, ss_i, t_i, o) in rel_offsets]
+    frags = [transp[o:o+n_frag]
+             for (transp, o) in zip(transps, rel_offsets)]
     frags = [normalize_pitches(td, frag) for frag in frags]
     frags = np.array(frags)
 
     prompt, orig = frags[:,:n_prompt], frags[:,n_prompt:]
-    SP.print('%s, %s' % (prompt.shape, orig.shape))
-
-    # Token(s) to avoid
-    # end_ix = td.encoder.encode_char((INSN_END, 0), False)
 
     # Generate tokens
-    skews = [g['sampling-method']] * len(rel_offsets)
+    skews = [g['sampling-method']] * len(offsets)
     if g['network-type'] in ('lstm', 'gpt2', 'transformer'):
         vocab_size = len(td.encoder.ix2ch)
         model = load_generating_model(g, vocab_size, n_clips)
@@ -66,9 +65,8 @@ def bulk_generate(g, root_path, rel_offsets, td, n_prompt, n_generate):
         seqs = orig
         log_probs = [0] * n_clips
     elif g['network-type'] == 'random':
-        ixs = [ix for ix in td.encoder.ix2ch if ix != end_ix]
-        seqs = np.array([choices(ixs, k = n_generate)
-                         for _ in rel_offsets])
+        ixs = list(td.encoder.ix2ch.keys())
+        seqs = np.array([choices(ixs, k = n_generate) for _ in offsets])
         log_probs = [0] * n_clips
     else:
         assert False
@@ -81,7 +79,7 @@ def bulk_generate(g, root_path, rel_offsets, td, n_prompt, n_generate):
     output_path.mkdir(exist_ok = True)
 
     save_generated_sequences(g, output_path, td,
-                             seqs, rel_offsets, log_probs, skews)
+                             seqs, offsets, log_probs, skews)
 
 def main():
     # Prologue
@@ -93,9 +91,6 @@ def main():
     # Kind of code
     g = get_code_generator(args['<generator>'])
 
-    _, td, _ = load_training_data(g['code-type'], root_path)
-    vocab_size = len(td.encoder.ix2ch)
-
     # Parse generation schedule
     n_prompt = int(args['--n-prompt'])
     n_generate = int(args['--n-generate'])
@@ -104,15 +99,18 @@ def main():
         raise ValueError('The number of tokens in the prompt and '
                          'the number of tokens to generate must '
                          'be divisible by two.')
+
+    # Load the generation schedule
+    output_path = root_path / 'bulk-generated'
+    output_path.mkdir(exist_ok = True)
+
+    # Load the cached code
+    _, td, _ = load_training_data(g['code-type'], root_path)
     if td.code_type == 'dcode':
         SP.print('Code type is dcode so halving generation sizes.')
         n_generate //= 2
         n_prompt //= 2
     n_frag = n_prompt + n_generate
-
-    # Load schedule and create the prompt array
-    output_path = root_path / 'bulk-generated'
-    output_path.mkdir(exist_ok = True)
 
     # We save the random indexes in a file so that the same bulk job
     # can be repeated using other code generators.
@@ -120,30 +118,30 @@ def main():
     schedule_path = output_path / schedule_name
     def pickle_cache_fun():
         return [random_rel_ofs(td, n_frag) for _ in range(n_clips)]
-    rel_offsets = load_pickle_cache(schedule_path, pickle_cache_fun)
+    offsets = load_pickle_cache(schedule_path, pickle_cache_fun)
 
     # Filter out those that already exist
-    output_path = root_path / 'bulk-generated'
     existing = [e.stem.split('-')[:6]
                 for e in output_path.glob('*.pickle.gz')]
     existing = [e for e in existing if len(e) == 6]
 
     existing = {tuple([int(p) for p in e[:4]] + [e[4], e[5]])
                 for e in existing}
-    print(existing)
 
-    rel_offsets = [rel_ofs for rel_ofs in rel_offsets
-                   if not rel_ofs + (g['code-type'], g['network-type'])
-                   in existing]
+    offsets = [ofs for ofs in offsets
+               if not ofs + (g['code-type'], g['network-type'])
+               in existing]
 
-    n_rel_offsets = len(rel_offsets)
-    SP.print('Generating %d clips.' % n_rel_offsets)
+    SP.header('GENERATING %d CLIPS' % len(offsets))
+    for ofs in offsets:
+        SP.print(ofs)
+    SP.leave()
 
     # Splitting the load into chunks of 16. To many sequences at once
     # either exhausts the memory or times out Google Colab.
     job_size = 16
-    for i in range(0, n_rel_offsets, job_size):
-        job = rel_offsets[i:i+job_size]
+    for i in range(0, len(offsets), job_size):
+        job = offsets[i:i+job_size]
         bulk_generate(g, root_path, job, td, n_prompt, n_generate)
 
 if __name__ == '__main__':
