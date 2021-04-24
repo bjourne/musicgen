@@ -7,6 +7,7 @@ from mido import Message, MidiFile, MidiTrack
 from musicgen.utils import SP, flatten, sort_groupby
 from os import system
 from pathlib import Path
+from shutil import rmtree
 from tempfile import mkdtemp
 
 Programs = namedtuple('Programs', ['melodic', 'percussive'])
@@ -154,3 +155,4 @@ def notes_to_audio_file(notes, audio_file, midi_mapping, stereo):
         system('timidity %s -OwM --preserve-silence' % mid)
         system('sox %s %s' % (temp_dir / 't.wav', audio_file))
     SP.leave()
+    rmtree(temp_dir)
