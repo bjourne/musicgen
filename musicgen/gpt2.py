@@ -10,13 +10,15 @@ from tensorflow.keras.layers import *
 import tensorflow as tf
 
 # GPT2 hyper params. Parameters are passed by setting these globals.
+# Old hardcoded:
 # HIDDEN_SIZE = 768
+N_LAYER = 12
+N_HEAD = 12
+
 HIDDEN_SIZE = None
 INITIALIZER_RANGE = 0.02
 N_POSITIONS = 1024
-N_LAYER = 12
 L_NORM_EPS = 1e-5
-N_HEAD = 12
 VOCAB_SIZE = None
 
 # Dropout rates
@@ -161,6 +163,9 @@ def print_hyper_params():
     SP.header('INITIALIZING GPT2 MODEL')
     SP.print('Vocab size : %5d' % VOCAB_SIZE)
     SP.print('Hidden size: %5d' % HIDDEN_SIZE)
+    SP.print('N layers   : %5d' % N_LAYER)
+    SP.print('N heads    : %5d' % N_HEAD)
+    SP.leave()
 
 class GPT2(Model):
     def __init__(self):
