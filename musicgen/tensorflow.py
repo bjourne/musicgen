@@ -9,7 +9,8 @@ from tensorflow.distribute import TPUStrategy
 from tensorflow.keras import *
 from tensorflow.keras.callbacks import ReduceLROnPlateau
 from tensorflow.keras.layers import *
-from tensorflow.keras.losses import SparseCategoricalCrossentropy
+from tensorflow.keras.losses import (SparseCategoricalCrossentropy,
+                                     sparse_categorical_crossentropy)
 from tensorflow.keras.optimizers import *
 from tensorflow.nn import softmax
 from tensorflow.tpu.experimental import initialize_tpu_system
@@ -178,6 +179,47 @@ def set_gpt2_params(g, vocab_size):
     gpt2.VOCAB_SIZE = vocab_size
     gpt2.HIDDEN_SIZE = g['hidden-size']
 
+def unlikelihood_loss(y_true, y_pred, from_logits):
+    if len(y_true.shape) != 2:
+        raise ValueError('y_true must have shape [bs x sl]')
+    if len(y_pred.shape) != 3:
+        raise ValueError('y_pred must have shape [bs x sl x vs]')
+    bs, sl, vs = y_pred.shape
+
+    # IDK about these casts.
+    y_true = tf.cast(y_true, tf.int32)
+    y_pred = tf.cast(y_pred, tf.float32)
+
+    # Produces a tensor of shape [bs x sl x vs]. The tensor is 1 if
+    # the unlikelihood loss should be applied for the token type and 0
+    # otherwise.
+    candidate_mask = tf.reshape(tf.tile(y_true, [1, sl]), (bs, sl, sl))
+    candidate_mask += 1
+    candidate_mask *= tf.sequence_mask(tf.range(sl), sl, dtype=tf.int32)
+    candidate_mask = tf.reduce_sum(
+        tf.one_hot(candidate_mask, vs + 1)[:, :, :, 1:], axis=2)
+    candidate_mask = tf.cast(tf.cast(candidate_mask, tf.bool), tf.float32)
+
+    # True mask has shape [bs x sl x vs] and is 0 if the token type
+    # is the true token and 1 otherwise.
+    true_mask = tf.cast(tf.math.logical_not(
+        tf.cast(tf.one_hot(y_true, vs, dtype=tf.int32), tf.bool)),
+                        tf.float32)
+
+    final_mask = candidate_mask * true_mask
+
+    if from_logits:
+        y_pred = tf.nn.softmax(y_pred, axis = -1)
+    unlikelihood = tf.math.log(1 - y_pred) * final_mask
+
+    # Reduce!
+    return -tf.reduce_sum(unlikelihood, axis = -1)
+
+def combined_ll_and_ul_loss(y_true, y_pred):
+    ll = sparse_categorical_crossentropy(y_true, y_pred, True)
+    ul = unlikelihood_loss(y_true, y_pred, True)
+    return tf.reduce_mean(ll + ul)
+
 def load_training_model(g, vocab_size):
     with select_strategy().scope():
         if g['network-type'] == 'transformer':
@@ -201,8 +243,10 @@ def load_training_model(g, vocab_size):
             assert False
         loss_fn = SparseCategoricalCrossentropy(from_logits = True)
         metrics = ['sparse_categorical_accuracy']
-        model.compile(optimizer = opt, loss = loss_fn,
-                      metrics = metrics)
+        model.compile(
+            optimizer = opt,
+            loss = loss_fn,
+            metrics = metrics)
         model(tf.constant([[0]]))
     return model
 
@@ -248,10 +292,6 @@ def skew_distribution(P, sampling_method):
 def sample_logits(logits, banned_ixs, skews):
     eps = np.finfo('float').eps
     Ps = softmax(logits).numpy()
-
-    confusion_indices = np.where(np.max(Ps, axis = 1) < 0.5)[0]
-    if len(confusion_indices) > 0:
-        SP.print([skews[i] for i in confusion_indices])
 
     # Dont sample any "banned" tokens
     for ix in banned_ixs:
@@ -305,35 +345,3 @@ def generate_sequences(g, model, prompt, n_generate, banned_ixs, skews):
         return generate_sequences_normal(model, n_generate,
                                          banned_ixs, prompt, skews,
                                          g['sequence-length'])
-
-def unlikelihood_loss(y_true, y_pred, from_logits):
-    if len(y_true.shape) != 2:
-        raise ValueError('y_true must have shape [bs x sl]')
-    if len(y_pred.shape) != 3:
-        raise ValueError('y_pred must have shape [bs x sl x vs]')
-    bs, sl, vs = y_pred.shape
-
-    # Produces a tensor of shape [bs x sl x vs]. The tensor is 1 if
-    # the unlikelihood loss should be applied for the token type and 0
-    # otherwise.
-    candidate_mask = tf.reshape(tf.tile(y_true, [1, sl]), (bs, sl, sl))
-    candidate_mask += 1
-    candidate_mask *= tf.sequence_mask(tf.range(sl), sl, dtype=tf.int32)
-    candidate_mask = tf.reduce_sum(
-        tf.one_hot(candidate_mask, vs + 1)[:, :, :, 1:], axis=2)
-    candidate_mask = tf.cast(tf.cast(candidate_mask, tf.bool), tf.float32)
-
-    # True mask has shape [bs x sl x vs] and is 0 if the token type
-    # is the true token and 1 otherwise.
-    true_mask = tf.cast(tf.math.logical_not(
-        tf.cast(tf.one_hot(y_true, vs, dtype=tf.int32), tf.bool)),
-                        tf.float32)
-
-    final_mask = candidate_mask * true_mask
-
-    if from_logits:
-        y_true = tf.nn.softmax(y_true, axis = -1)
-    unlikelihood = tf.math.log(1 - y_true) * final_mask
-
-    # Reduce!
-    return -tf.reduce_sum(unlikelihood, axis = -1)
