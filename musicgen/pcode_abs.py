@@ -20,3 +20,9 @@ def normalize_pitches(code):
 
 def estimate_row_time(code):
     return pcode.estimate_row_time(code, False)
+
+def from_pcode(code):
+    return code
+
+def to_pcode(code):
+    return code
