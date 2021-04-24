@@ -15,6 +15,7 @@ Options:
 '''
 from docopt import docopt
 from math import sin, pi
+from musicgen import pcode
 from musicgen.code_generators import get_code_generator
 from musicgen.code_utils import CODE_MIDI_MAPPING
 from musicgen.generation import notes_to_audio_file
@@ -31,7 +32,6 @@ def main():
 
     # Prompt is used to estimate tempo
     n_prompt = int(args['--n-prompt'])
-    assert n_prompt % 2 == 0
 
     format = args['--format']
     for file_path in file_paths:
@@ -39,13 +39,9 @@ def main():
         code_type = file_path.name.split('-')[4]
         code_mod = CODE_MODULES[code_type]
 
-        # Halve the code length to use for tempo estimation in case
-        # dcode is used since its encoding is twice as dense.
-        if code_type == 'dcode':
-            n_estimate = n_prompt // 2
-        else:
-            n_estimate = n_prompt
-        row_time = code_mod.estimate_row_time(code[:n_estimate])
+
+        as_pcode = list(code_mod.to_pcode(code))
+        row_time = pcode.estimate_row_time(as_pcode[:n_prompt], False)
         notes = code_mod.to_notes(code, row_time)
 
         # Creates a simple fadeout. Not sure if it is a good feature
