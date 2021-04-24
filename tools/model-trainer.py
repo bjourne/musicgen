@@ -67,24 +67,15 @@ def training_data_to_dataset(td, sl, bs):
     for _, s in td.songs:
         for ss in s:
             for t in ss:
-                # Bug checking
-                assert len(t[t < 0]) == 0
-                assert len(t[t > 45]) == 0
                 assert t.dtype == np.uint16
                 t = t.copy()
                 wins = slide_window(t, sl + 1, sl, None)
                 for win in wins:
                     win = win.copy()
-                    assert len(win[win > 45]) > 0
                     windows.append(win)
     shuffle(windows)
 
     SP.print('Created %d sliding windows.' % len(windows))
-    for window in windows:
-        assert len(window[window < 0]) == 0
-        if len(window[window > 45]) > 0:
-            print(window)
-        assert len(window[window > 45]) == 0
 
     # Length must be a multiple of bs
     n_samples = (len(windows) // bs) * bs
@@ -96,7 +87,6 @@ def training_data_to_dataset(td, sl, bs):
     ys = np.array([e[1:] for e in windows])
 
     return xs, ys
-
 
 def main():
     # Prologue
