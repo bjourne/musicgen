@@ -34,7 +34,7 @@ CODE_GENERATORS = {
         'batch-size' : 64,
         'learning-rate' : 0.00001,
         'sequence-length' : 512,
-        'sampling-method' : ('top-p', 0.99),
+        'sampling-method' : ('temperature', 1.01),
         'hidden-size' : 768
     },
     # Training this one with unlikelihood
@@ -42,9 +42,9 @@ CODE_GENERATORS = {
         'code-type' : 'pcode_abs',
         'network-type' : 'gpt2',
 
-        'batch-size' : 256,
+        'batch-size' : 64,
         'learning-rate' : 0.00001,
-        'sequence-length' : 256,
+        'sequence-length' : 510,
         'sampling-method' : ('top-p', 0.92),
         'hidden-size' : 768
     },
