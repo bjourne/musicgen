@@ -1,11 +1,11 @@
 # Copyright (C) 2021 Björn Lindqvist <bjourne@gmail.com>
 """
-Bulk generation
-===============
-Tool for bulk generation of songs.
+Measure perplexity
+==================
+Tool for measuring a model's perplexity
 
 Usage:
-    bulk-generate.py [options] <root-path> <generator>
+    measure-perplexity.py [options] <root-path> <generator>
 
 Options:
     -h --help                show this screen
@@ -13,25 +13,27 @@ Options:
     --n-prompt=<i>           number of tokens in the prompt
     --n-generate=<i>         number of tokens to generate per clip
     --n-clips=<i>            number of clips
+    --use-original           use original data for measurements
 """
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from docopt import docopt
 from musicgen.code_generators import get_code_generator, weights_file
-from musicgen.tensorflow import load_generating_model, generate_sequences
+from musicgen.tensorflow import load_generating_model, measure_sequences
 from musicgen.training_data import (CODE_MODULES,
                                     load_training_data,
                                     normalize_pitches,
                                     random_rel_ofs,
                                     save_generated_sequences)
-from musicgen.utils import SP, load_pickle_cache
+from musicgen.utils import SP, load_pickle_cache, save_pickle
 from pathlib import Path
 from random import choices
 
 import numpy as np
 import tensorflow as tf
 
-def bulk_generate(g, root_path, offsets, td, n_prompt, n_generate):
+def bulk_measure(g, root_path, offsets, td, n_prompt, n_generate,
+                 measure_original):
     n_clips = len(offsets)
     n_frag = n_prompt + n_generate
 
@@ -58,27 +60,13 @@ def bulk_generate(g, root_path, offsets, td, n_prompt, n_generate):
         assert weights_path.exists()
         model.load_weights(str(weights_path))
         model.reset_states()
-        seqs, log_probs = generate_sequences(g, model, prompt, n_generate,
-                                             [], skews)
-    elif g['network-type'] == 'original':
-        seqs = orig
-        log_probs = [0] * n_clips
-    elif g['network-type'] == 'random':
-        ixs = list(td.encoder.ix2ch.keys())
-        seqs = np.array([choices(ixs, k = n_generate) for _ in offsets])
-        log_probs = [0] * n_clips
+        if not measure_original:
+            orig = None
+        log_probs = measure_sequences(g, model, prompt, n_generate,
+                                      skews, orig)
     else:
         assert False
-
-    # Concatenate
-    seqs = np.hstack((prompt, seqs))
-
-    # Save generated code
-    output_path = root_path / 'bulk-generated'
-    output_path.mkdir(exist_ok = True)
-
-    save_generated_sequences(g, output_path, td,
-                             seqs, offsets, log_probs, skews)
+    return log_probs
 
 def main():
     # Prologue
@@ -88,7 +76,8 @@ def main():
     root_path = Path(args['<root-path>'])
 
     # Kind of code
-    g = get_code_generator(args['<generator>'])
+    gen_name = args['<generator>']
+    g = get_code_generator(gen_name)
 
     # Parse generation schedule
     n_prompt = int(args['--n-prompt'])
@@ -100,8 +89,8 @@ def main():
                          'be divisible by two.')
 
     # Load the generation schedule
-    output_path = root_path / 'bulk-generated'
-    output_path.mkdir(exist_ok = True)
+    perp_path = root_path / 'perplexity'
+    perp_path.mkdir(exist_ok = True)
 
     # Load the cached code
     _, td, _ = load_training_data(g['code-type'], root_path)
@@ -114,34 +103,46 @@ def main():
     # We save the random indexes in a file so that the same bulk job
     # can be repeated using other code generators.
     schedule_name = 'schedule-%04d.pickle.gz' % n_clips
-    schedule_path = output_path / schedule_name
+    schedule_path = perp_path / schedule_name
     def pickle_cache_fun():
         return [random_rel_ofs(td, n_frag) for _ in range(n_clips)]
     offsets = load_pickle_cache(schedule_path, pickle_cache_fun)
 
-    # Filter out those that already exist
-    existing = [e.stem.split('-')[:6]
-                for e in output_path.glob('*.pickle.gz')]
-    existing = [e for e in existing if len(e) == 6]
+    # Save all measurements in a datafile
+    measurements_name = 'measurements-%04d.pickle.gz' % n_clips
+    measurements_path = perp_path / measurements_name
+    measurements = load_pickle_cache(measurements_path, lambda: {})
+    if not gen_name in measurements:
+        measurements[gen_name] = {}
 
-    existing = {tuple([int(p) for p in e[:4]] + [e[4], e[5]])
-                for e in existing}
+    use_original = args['--use-original']
+    if not use_original in measurements[gen_name]:
+        measurements[gen_name][use_original] = {}
+    offsets = [o for o in offsets
+               if not o in measurements[gen_name][use_original]]
 
-    offsets = [ofs for ofs in offsets
-               if not ofs + (g['code-type'], g['network-type'])
-               in existing]
-
-    SP.header('GENERATING %d CLIPS' % len(offsets))
-    for ofs in offsets:
-        SP.print(ofs)
-    SP.leave()
+    SP.print('Measuring %d offsets...' % len(offsets))
 
     # Splitting the load into chunks of 16. To many sequences at once
     # either exhausts the memory or times out Google Colab.
     job_size = 16
     for i in range(0, len(offsets), job_size):
         job = offsets[i:i+job_size]
-        bulk_generate(g, root_path, job, td, n_prompt, n_generate)
+        log_probs = bulk_measure(g, root_path, job, td,
+                                 n_prompt, n_generate, use_original)
+        for offset, log_prob in zip(job, log_probs):
+            logppl = -log_prob / n_generate
+            measurements[gen_name][use_original][offset] = logppl
+        save_pickle(measurements_path, measurements)
+    for gen_name, cats in measurements.items():
+        SP.header(gen_name)
+        for use_original, offsets in cats.items():
+            SP.header('%s' % use_original)
+            for ofs, ppl in offsets.items():
+                SP.print('%s %.3f' % (ofs, ppl))
+            SP.leave()
+        SP.leave()
+
 
 if __name__ == '__main__':
     main()

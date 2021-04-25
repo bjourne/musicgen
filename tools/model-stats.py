@@ -8,16 +8,24 @@ Usage:
 Options:
     -h --help              show this screen
     -v --verbose           print more output
+
+Generates plots and figures for the given model and saves them in
+the directory <root-path>/stats.
 """
 from os import environ
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from docopt import docopt
+from matplotlib.ticker import MaxNLocator
 from musicgen.code_generators import (file_stem,
                                       get_code_generator,
-                                      log_file)
-from musicgen.training_data import TrainingData, tally_tokens
-from musicgen.utils import SP
+                                      log_file,
+                                      weights_file)
+from musicgen.training_data import (TrainingData,
+                                    load_training_data,
+                                    random_rel_ofs,
+                                    tally_tokens)
+from musicgen.utils import SP, load_pickle_cache
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -32,10 +40,11 @@ def loss_plot(log_file, png_path):
     n = len(losses)
     ax.plot(range(1, n + 1), losses, label = 'Training loss')
     ax.plot(range(1, n + 1), val_losses, label = 'Validation loss')
-    ax.set(xlabel = 'epoch', ylabel = 'loss',
-           title = 'Categorical cross-entropy loss')
-    ax.grid()
+    ax.xaxis.set_major_locator(MaxNLocator(integer = True))
+    ax.set(xlabel = 'epoch', ylabel = 'loss')
     ax.legend()
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
     fig.savefig(png_path)
 
 def token_distribution_plot(td, png_path):
@@ -44,7 +53,6 @@ def token_distribution_plot(td, png_path):
     values = [v for (_, v) in counts]
 
     tot = sum(values)
-    print('tot', tot)
     values = [v / tot for v in values]
 
     type_colors = {
@@ -65,6 +73,8 @@ def token_distribution_plot(td, png_path):
                        ha = 'right')
     tot_fmt = '{:,}'.format(sum(values))
     ax.set(xlabel = 'token', ylabel = 'freq.')
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
     fig.savefig(png_path)
 
 def main():
@@ -76,6 +86,7 @@ def main():
     # Kind of code
     g = get_code_generator(args['<model>'])
 
+    # Load training data
     td = TrainingData(g['code-type'])
     td.load_disk_cache(root_path, 150)
 

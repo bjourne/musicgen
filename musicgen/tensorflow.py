@@ -289,26 +289,22 @@ def skew_distribution(P, sampling_method):
     else:
         assert False
 
-def sample_logits(logits, banned_ixs, skews):
+def sample_logits(logits, skews):
     eps = np.finfo('float').eps
     Ps = softmax(logits).numpy()
-
-    # Dont sample any "banned" tokens
-    for ix in banned_ixs:
-        Ps[:, ix] = eps
 
     for i in range(Ps.shape[0]):
         Ps[i] = skew_distribution(Ps[i], skews[i])
     ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
     return ixs, [np.log(Ps[i, ix]) for i, ix in enumerate(ixs)]
 
-def generate_sequences_normal(model, n_generate, banned_ixs, prompt, skews,
+def generate_sequences_normal(model, n_generate, prompt, skews,
                               max_seq_len):
     log_prob_sums = np.zeros(len(skews))
     preds = np.empty((0, prompt.shape[0]), int)
     for _ in trange(n_generate):
         logits = model(prompt, training = False)[:, -1, :]
-        ixs, log_probs = sample_logits(logits, banned_ixs, skews)
+        ixs, log_probs = sample_logits(logits, skews)
         preds = np.vstack((preds, ixs))
         log_prob_sums += log_probs
 
@@ -319,8 +315,7 @@ def generate_sequences_normal(model, n_generate, banned_ixs, prompt, skews,
             prompt = prompt[:, 1:]
     return preds.T, log_prob_sums
 
-def generate_sequences_lstm(model, n_generate, banned_ixs,
-                            prompt, skews):
+def generate_sequences_lstm(model, n_generate, prompt, skews):
     for i in trange(prompt.shape[1] - 1):
         model.predict(prompt[:, i])
 
@@ -330,18 +325,77 @@ def generate_sequences_lstm(model, n_generate, banned_ixs,
     log_prob_sums = np.zeros(len(skews))
     for _ in trange(n_generate):
         logits = model.predict(preds[-1])[:, -1, :]
-        ixs, log_probs = sample_logits(logits, banned_ixs, skews)
+        ixs, log_probs = sample_logits(logits, skews)
         log_prob_sums += log_probs
         preds = np.vstack((preds, ixs))
     # Skip the first element which is not actually a prediction.
     return preds.T[:,1:], log_prob_sums
 
-def generate_sequences(g, model, prompt, n_generate, banned_ixs, skews):
+def generate_sequences(g, model, prompt, n_generate, skews):
     if g['network-type'] == 'lstm':
-        return generate_sequences_lstm(model, n_generate,
-                                       banned_ixs,
-                                       prompt, skews)
+        return generate_sequences_lstm(model, n_generate, prompt, skews)
     else:
         return generate_sequences_normal(model, n_generate,
-                                         banned_ixs, prompt, skews,
+                                         prompt, skews,
                                          g['sequence-length'])
+
+# Bad code duplication, but I don't have time to fix it now.
+def measure_sequences_lstm(model, n_generate, prompt, skews, orig):
+    for i in trange(prompt.shape[1] - 1):
+        model.predict(prompt[:, i])
+
+    # The last item of the prompt is saved so that it can be used to
+    # generate the first prediction.
+    preds = np.expand_dims(prompt[:, -1], 0)
+    log_prob_sums = np.zeros(len(skews))
+    for _ in trange(n_generate):
+        logits = model.predict(preds[-1])[:, -1, :]
+        Ps = softmax(logits).numpy()
+        basePs = np.array(Ps)
+        if orig is None:
+            # Sample indexes
+            for i in range(Ps.shape[0]):
+                Ps[i] = skew_distribution(Ps[i], skews[i])
+            ixs = np.array([np.random.choice(len(P), p = P) for P in Ps])
+            assert not np.array_equal(Ps, basePs)
+        else:
+            # Take indexes from orig
+            ixs = orig[:, 0]
+            orig = orig[:, 1:]
+
+        # For measurement, we use the log probs PRIOR to sampling.
+        log_probs = [np.log(basePs[i, ix]) for i, ix in enumerate(ixs)]
+        log_prob_sums += log_probs
+        preds = np.vstack((preds, ixs))
+    return log_prob_sums
+
+def measure_sequences_normal(model, n_generate, prompt, skews,
+                             max_seq_len, orig):
+    log_prob_sums = np.zeros(len(skews))
+    preds = np.empty((0, prompt.shape[0]), int)
+    for _ in trange(n_generate):
+        logits = model(prompt, training = False)[:, -1, :]
+        ixs, log_probs = sample_logits(logits, skews)
+        preds = np.vstack((preds, ixs))
+        log_prob_sums += log_probs
+        if orig is not None:
+            # use original data
+            prompt = np.append(prompt, orig[:, :1], axis = 1)
+            orig = orig[:, 1:]
+        else:
+            ixs_vector = np.expand_dims(ixs, 1)
+            # Append column
+            prompt = np.append(prompt, ixs_vector, axis = 1)
+        if prompt.shape[1] > max_seq_len:
+            # Delete first column
+            prompt = prompt[:, 1:]
+    return log_prob_sums
+
+def measure_sequences(g, model, prompt, n_generate, skews, orig):
+    if g['network-type'] == 'lstm':
+        return measure_sequences_lstm(model, n_generate,
+                                      prompt, skews, orig)
+    else:
+        return measure_sequences_normal(model, n_generate,
+                                        prompt, skews,
+                                        g['sequence-length'], orig)
