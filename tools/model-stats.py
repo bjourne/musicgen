@@ -63,7 +63,7 @@ def token_distribution_plot(td, png_path):
         'X' : 'C3'
     }
 
-    fig, ax = plt.subplots(figsize = (12, 6))
+    fig, ax = plt.subplots(figsize = (12, 4))
     bars = ax.bar(np.arange(len(values)), values, width = 0.80)
     for bar, name in zip(bars, names):
         bar.set_color(type_colors[name[0]])
