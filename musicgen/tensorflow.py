@@ -142,6 +142,7 @@ def transformer(vocab_size, d_model, ffn_units, dropout,
 
     for _ in range(n_layers):
         # Multihead attention part
+        # This may be wrong because it uses bias.
         wq = Dense(d_model)(x)
         wk = Dense(d_model)(x)
         wv = Dense(d_model)(x)
