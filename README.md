@@ -1,6 +1,8 @@
 # MusicGen
 
-Music generation using neural networks
+Music generation using neural networks. This repo complements the
+music survey app
+[django-musicsurvey](https://github.com/bjourne/django-musicsurvey).
 
 # Links
 
